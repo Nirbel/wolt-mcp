@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wolt"
+  short_description: "Operate Wolt marketplace and Drive APIs"
+  default_prompt: "Use $wolt to inspect or update Wolt safely."

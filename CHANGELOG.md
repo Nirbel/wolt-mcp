@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Release documentation, CI and dependency automation, contribution guidance, and security reporting policy.
+- Installable Codex and Claude Code marketplace plugins generated from one self-contained bundle.
+- An npm-compatible `wolt-mcp` executable for a future registry release.
 
 ### Changed
 

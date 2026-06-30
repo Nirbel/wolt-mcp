@@ -1,0 +1,19 @@
+{
+  "name": "wolt",
+  "displayName": "Wolt MCP",
+  "version": "0.1.0",
+  "description": "Operate Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter integrations through MCP.",
+  "author": {
+    "name": "Nirbel",
+    "url": "https://github.com/Nirbel"
+  },
+  "homepage": "https://github.com/Nirbel/wolt-mcp#readme",
+  "repository": "https://github.com/Nirbel/wolt-mcp",
+  "keywords": [
+    "wolt",
+    "mcp",
+    "menu",
+    "orders",
+    "delivery"
+  ]
+}

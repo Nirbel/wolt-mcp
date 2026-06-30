@@ -1,0 +1,20 @@
+{
+  "name": "nirbel-wolt",
+  "interface": {
+    "displayName": "Nirbel Wolt"
+  },
+  "plugins": [
+    {
+      "name": "wolt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wolt"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
