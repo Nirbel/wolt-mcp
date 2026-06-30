@@ -89,6 +89,7 @@ export class WoltClient {
     const init: RequestInit = {
       method: request.method,
       headers,
+      redirect: "error",
       signal: AbortSignal.timeout(request.timeoutMs ?? 15_000)
     };
     if (request.payload !== undefined) {
