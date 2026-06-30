@@ -73,12 +73,80 @@ describe("MenuService.getMenu", () => {
     await expect(service.getMenu({ environment: "test", venueId: "v1", timeoutMs: 1000 })).resolves.toEqual({ id: "m1", items: [] });
   });
 
+  it("blocks redirects when polling the generated menu resource", async () => {
+    const client = {
+      request: vi.fn(async () => ({
+        status: 202,
+        accepted: true,
+        data: { request_id: "r1", resource_url: "https://bucket.s3.eu-west-1.amazonaws.com/result" }
+      }))
+    } as unknown as WoltClient;
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.redirect).toBe("error");
+      return new Response(JSON.stringify({ status: "READY", menu: { id: "m1" } }), { status: 200 });
+    });
+    const service = new MenuService({ client, fetcher });
+
+    await expect(service.getMenu({ environment: "test", venueId: "v1" })).resolves.toEqual({ id: "m1" });
+  });
+
+  it("never sleeps past the menu polling deadline", async () => {
+    let now = 0;
+    const sleeps: number[] = [];
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => new AbortController().signal);
+    const client = {
+      request: vi.fn(async () => ({
+        status: 202,
+        accepted: true,
+        data: { request_id: "r1", resource_url: "https://x.amazonaws.com/result" }
+      }))
+    } as unknown as WoltClient;
+    const service = new MenuService({
+      client,
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ status: "PENDING" }), { status: 200 })),
+      sleep: vi.fn(async (milliseconds) => { sleeps.push(milliseconds); now += milliseconds; }),
+      now: () => now
+    });
+
+    await expect(service.getMenu({ environment: "test", venueId: "v1", timeoutMs: 750 })).rejects.toThrow(/timed out/i);
+    expect(sleeps).toEqual([500, 250]);
+    expect(timeoutSpy.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([750, 250]);
+    timeoutSpy.mockRestore();
+  });
+
   it("rejects unsafe resource URLs", async () => {
     const client = {
       request: vi.fn(async () => ({ status: 202, accepted: true, data: { request_id: "r1", resource_url: "http://127.0.0.1/secret" } }))
     } as unknown as WoltClient;
     const service = new MenuService({ client, fetcher: vi.fn() });
     await expect(service.getMenu({ environment: "test", venueId: "v1" })).rejects.toThrow(/unsafe/i);
+  });
+
+  it("rejects malformed initial and polling responses", async () => {
+    const malformedInitial = new MenuService({
+      client: { request: vi.fn(async () => ({ status: 202, accepted: true, data: null })) } as unknown as WoltClient,
+      fetcher: vi.fn()
+    });
+    await expect(malformedInitial.getMenu({ environment: "test", venueId: "v1" })).rejects.toThrow(/malformed asynchronous/i);
+
+    const client = {
+      request: vi.fn(async () => ({
+        status: 202,
+        accepted: true,
+        data: { resource_url: "https://x.amazonaws.com/result" }
+      }))
+    } as unknown as WoltClient;
+    const malformedJson = new MenuService({
+      client,
+      fetcher: vi.fn(async () => new Response("not-json", { status: 200 }))
+    });
+    await expect(malformedJson.getMenu({ environment: "test", venueId: "v1" })).rejects.toThrow(/malformed JSON/i);
+
+    const unknownStatus = new MenuService({
+      client,
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ status: "MYSTERY" }), { status: 200 }))
+    });
+    await expect(unknownStatus.getMenu({ environment: "test", venueId: "v1" })).rejects.toThrow(/Unknown Wolt menu status/);
   });
 
   it("surfaces Wolt error and timeout states", async () => {

@@ -1,8 +1,25 @@
 {
   "name": "wolt-mcp-plugin",
   "version": "0.1.0",
+  "description": "Portable Wolt API MCP server and Codex skill with explicit production safeguards.",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nirbel/walt-mcp.git"
+  },
+  "homepage": "https://github.com/Nirbel/walt-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Nirbel/walt-mcp/issues"
+  },
+  "keywords": [
+    "wolt",
+    "mcp",
+    "model-context-protocol",
+    "codex",
+    "wolt-drive"
+  ],
   "engines": {
     "node": ">=20"
   },

@@ -91,10 +91,10 @@ function annotations(operation: WoltOperation): ToolAnnotations {
 }
 
 const selectorProperties = {
-  id: { type: "string", description: "Wolt item ID." },
-  external_id: { type: "string", description: "Matches v2 external_id or legacy external_data." },
-  gtin: { type: "string", description: "Matches v2 gtin or legacy gtin_barcode." },
-  sku: { type: "string", description: "Matches v2 sku or legacy merchant_sku." }
+  id: { type: "string", minLength: 1, description: "Wolt item ID." },
+  external_id: { type: "string", minLength: 1, description: "Matches v2 external_id or legacy external_data." },
+  gtin: { type: "string", minLength: 1, description: "Matches v2 gtin or legacy gtin_barcode." },
+  sku: { type: "string", minLength: 1, description: "Matches v2 sku or legacy merchant_sku." }
 };
 
 function menuHelper(name: string, title: string, description: string): ToolDefinition {
@@ -106,11 +106,17 @@ function menuHelper(name: string, title: string, description: string): ToolDefin
       type: "object",
       properties: {
         environment: { type: "string", enum: ["test", "production"] },
-        venueId: { type: "string" },
+        venueId: { type: "string", minLength: 1 },
         ...selectorProperties,
         timeout_ms: { type: "integer", minimum: 100, maximum: 120000, default: 30000 }
       },
       required: ["environment", "venueId"],
+      oneOf: [
+        { required: ["id"] },
+        { required: ["external_id"] },
+        { required: ["gtin"] },
+        { required: ["sku"] }
+      ],
       additionalProperties: false
     },
     annotations: { title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }

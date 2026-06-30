@@ -130,11 +130,14 @@ export class MenuService {
     const resourceUrl = assertAllowedResourceUrl(requested.data.resource_url);
     const startedAt = this.#now();
 
-    while (this.#now() - startedAt <= timeoutMs) {
+    while (true) {
+      const requestRemainingMs = timeoutMs - (this.#now() - startedAt);
+      if (requestRemainingMs <= 0) break;
       const response = await this.#fetcher(resourceUrl, {
         method: "GET",
         headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(Math.min(timeoutMs, 15_000))
+        redirect: "error",
+        signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15_000))
       });
       if (!response.ok) throw new Error(`Wolt menu resource returned HTTP ${response.status}`);
       let result: unknown;
@@ -154,7 +157,9 @@ export class MenuService {
         throw new Error(`Wolt menu generation failed: ${typeof result.error === "string" ? result.error : "unknown error"}`);
       }
       if (result.status !== "PENDING") throw new Error(`Unknown Wolt menu status: ${result.status}`);
-      await this.#sleep(500);
+      const remainingMs = timeoutMs - (this.#now() - startedAt);
+      if (remainingMs <= 0) break;
+      await this.#sleep(Math.min(500, remainingMs));
     }
     throw new Error(`Wolt menu polling timed out after ${timeoutMs}ms`);
   }

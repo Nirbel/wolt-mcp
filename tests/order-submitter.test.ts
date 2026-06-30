@@ -52,6 +52,35 @@ describe("Order Submitter validation", () => {
     expect(result.errors.join(" ")).toMatch(/venue|items|created_at/);
   });
 
+  it("validates documented enums and nested value types", () => {
+    const invalid = {
+      ...order,
+      order_status: "invented-status",
+      price: { amount: "1000", currency: "EUR" },
+      delivery: { status: "teleported", type: "homedelivery", self_delivery: false }
+    };
+    const result = validateOrderSubmitter({ environment: "test", rawBody: JSON.stringify(invalid) });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/order_status|price|delivery/);
+  });
+
+  it("validates documented item and preorder structures", () => {
+    const invalid = {
+      ...order,
+      items: [{
+        id: "item-1",
+        item_type: "invented-item-type",
+        total_price: { amount: "1000", currency: "EUR" }
+      }],
+      pre_order: { preorder_time: "2026-06-30T10:00:00Z", pre_order_status: "later" }
+    };
+    const result = validateOrderSubmitter({ environment: "test", rawBody: JSON.stringify(invalid) });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/items|pre_order/);
+  });
+
   it("exports a JSON schema suitable for the MCP resource", () => {
     expect(ORDER_SUBMITTER_SCHEMA).toMatchObject({ type: "object", additionalProperties: true });
     expect(ORDER_SUBMITTER_SCHEMA.required).toContain("id");

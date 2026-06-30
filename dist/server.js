@@ -15508,6 +15508,7 @@ var WoltClient = class {
     const init = {
       method: request.method,
       headers,
+      redirect: "error",
       signal: AbortSignal.timeout(request.timeoutMs ?? 15e3)
     };
     if (request.payload !== void 0) {
@@ -15645,11 +15646,14 @@ var MenuService = class {
     if (!isObject2(requested.data)) throw new Error("Wolt returned a malformed asynchronous menu response");
     const resourceUrl = assertAllowedResourceUrl(requested.data.resource_url);
     const startedAt = this.#now();
-    while (this.#now() - startedAt <= timeoutMs) {
+    while (true) {
+      const requestRemainingMs = timeoutMs - (this.#now() - startedAt);
+      if (requestRemainingMs <= 0) break;
       const response = await this.#fetcher(resourceUrl, {
         method: "GET",
         headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(Math.min(timeoutMs, 15e3))
+        redirect: "error",
+        signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15e3))
       });
       if (!response.ok) throw new Error(`Wolt menu resource returned HTTP ${response.status}`);
       let result;
@@ -15669,7 +15673,9 @@ var MenuService = class {
         throw new Error(`Wolt menu generation failed: ${typeof result.error === "string" ? result.error : "unknown error"}`);
       }
       if (result.status !== "PENDING") throw new Error(`Unknown Wolt menu status: ${result.status}`);
-      await this.#sleep(500);
+      const remainingMs = timeoutMs - (this.#now() - startedAt);
+      if (remainingMs <= 0) break;
+      await this.#sleep(Math.min(500, remainingMs));
     }
     throw new Error(`Wolt menu polling timed out after ${timeoutMs}ms`);
   }
@@ -15691,20 +15697,126 @@ var ORDER_SUBMITTER_SCHEMA = {
       required: ["id"],
       properties: { id: { type: "string" }, name: { type: "string" } }
     },
-    items: { type: "array", items: { type: "object", additionalProperties: true } },
+    price: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        amount: { type: "integer" },
+        currency: { type: "string" }
+      }
+    },
+    delivery: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        status: {
+          type: "string",
+          enum: ["estimated", "assigned", "courier_at_venue", "picked_up", "courier_at_delivery_location", "delivered"]
+        },
+        type: { type: "string", enum: ["takeaway", "homedelivery", "eatin"] },
+        time: { type: ["string", "null"] },
+        self_delivery: { type: "boolean" }
+      }
+    },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          count: { type: "integer" },
+          pos_id: { type: ["string", "null"] },
+          row_number: { type: "integer" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                value: { type: "string" },
+                count: { type: "integer" },
+                pos_id: { type: ["string", "null"] },
+                value_pos_id: { type: ["string", "null"] },
+                price: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    amount: { type: "integer" },
+                    currency: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          category: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" }
+            }
+          },
+          substitution_settings: {
+            type: "object",
+            additionalProperties: true,
+            properties: { is_allowed: { type: "boolean" } }
+          },
+          total_price: {
+            type: "object",
+            additionalProperties: true,
+            properties: { amount: { type: "integer" }, currency: { type: "string" } }
+          },
+          unit_price: {
+            type: "object",
+            additionalProperties: true,
+            properties: { amount: { type: "integer" }, currency: { type: "string" } }
+          },
+          base_price: {
+            type: "object",
+            additionalProperties: true,
+            properties: { amount: { type: "integer" }, currency: { type: "string" } }
+          },
+          weight_details: {
+            type: ["object", "null"],
+            additionalProperties: true,
+            properties: {
+              weight_in_grams: { type: "integer" },
+              requested_amount: { type: "integer" },
+              extra_weight_percentage: { type: "integer" }
+            }
+          },
+          sku: { type: ["string", "null"] },
+          gtin: { type: ["string", "null"] },
+          item_type: { type: "string", enum: ["order-item", "order-retail-item"] }
+        }
+      }
+    },
     created_at: { type: "string" },
-    modified_at: { type: ["string", "null"] },
+    modified_at: { type: "string" },
+    pickup_eta: { type: "string" },
     order_number: { type: "string" },
-    order_status: { type: "string" },
+    order_status: {
+      type: "string",
+      enum: ["received", "fetched", "acknowledged", "production", "ready", "delivered", "rejected", "other"]
+    },
     type: { type: "string", enum: ["preorder", "instant"] },
     consumer_comment: { type: ["string", "null"] },
-    consumer_name: { type: ["string", "null"] },
+    consumer_name: { type: "string" },
     consumer_phone_number: { type: ["string", "null"] },
-    attribution_id: { type: ["string", "null"] },
+    attribution_id: { type: "string" },
     company_tax_id: { type: ["string", "null"] },
-    price: { type: "object", additionalProperties: true },
-    delivery: { type: "object", additionalProperties: true },
-    pre_order: { type: ["object", "null"], additionalProperties: true }
+    pre_order: {
+      type: ["object", "null"],
+      additionalProperties: true,
+      properties: {
+        preorder_time: { type: "string" },
+        pre_order_status: { type: "string", enum: ["confirmed", "waiting"] }
+      }
+    }
   }
 };
 var ajv = new import_ajv2.Ajv({ allErrors: true, strict: false });
@@ -33371,10 +33483,10 @@ function annotations(operation) {
   };
 }
 var selectorProperties = {
-  id: { type: "string", description: "Wolt item ID." },
-  external_id: { type: "string", description: "Matches v2 external_id or legacy external_data." },
-  gtin: { type: "string", description: "Matches v2 gtin or legacy gtin_barcode." },
-  sku: { type: "string", description: "Matches v2 sku or legacy merchant_sku." }
+  id: { type: "string", minLength: 1, description: "Wolt item ID." },
+  external_id: { type: "string", minLength: 1, description: "Matches v2 external_id or legacy external_data." },
+  gtin: { type: "string", minLength: 1, description: "Matches v2 gtin or legacy gtin_barcode." },
+  sku: { type: "string", minLength: 1, description: "Matches v2 sku or legacy merchant_sku." }
 };
 function menuHelper(name, title, description) {
   return {
@@ -33385,11 +33497,17 @@ function menuHelper(name, title, description) {
       type: "object",
       properties: {
         environment: { type: "string", enum: ["test", "production"] },
-        venueId: { type: "string" },
+        venueId: { type: "string", minLength: 1 },
         ...selectorProperties,
         timeout_ms: { type: "integer", minimum: 100, maximum: 12e4, default: 3e4 }
       },
       required: ["environment", "venueId"],
+      oneOf: [
+        { required: ["id"] },
+        { required: ["external_id"] },
+        { required: ["gtin"] },
+        { required: ["sku"] }
+      ],
       additionalProperties: false
     },
     annotations: { title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }

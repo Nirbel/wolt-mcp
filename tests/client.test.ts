@@ -40,10 +40,47 @@ describe("WoltClient.request", () => {
       "https://pos-integration-service.development.dev.woltapi.com/venues/venue%20%2F%201/items",
       expect.objectContaining({
         method: "PATCH",
+        redirect: "error",
         headers: expect.objectContaining({ authorization: "Bearer secret", "content-type": "application/json" }),
         body: JSON.stringify({ data: [{ sku: "A", price: 100 }] })
       })
     );
+  });
+
+  it.each([201, 202, 204])("handles successful HTTP %s responses", async (status) => {
+    const client = new WoltClient({
+      fetcher: vi.fn(async () => new Response(status === 204 ? null : JSON.stringify({ status }), {
+        status,
+        headers: { "content-type": "application/json" }
+      })),
+      env: { WOLT_MARKETPLACE_TOKEN_TEST: "secret" }
+    });
+    await expect(client.request({
+      auth: "marketplace",
+      environment: "test",
+      method: "POST",
+      path: "/test",
+      pathParams: {},
+      confirmProduction: false
+    })).resolves.toMatchObject({ status });
+  });
+
+  it.each([400, 401, 403, 404, 409, 429, 500, 503])("surfaces HTTP %s without leaking credentials", async (status) => {
+    const client = new WoltClient({
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ error: `status-${status}` }), {
+        status,
+        headers: { "content-type": "application/json" }
+      })),
+      env: { WOLT_MARKETPLACE_TOKEN_TEST: "secret" }
+    });
+    await expect(client.request({
+      auth: "marketplace",
+      environment: "test",
+      method: "GET",
+      path: "/test",
+      pathParams: {},
+      confirmProduction: false
+    })).rejects.toThrow(new RegExp(`HTTP ${status}.*status-${status}`));
   });
 
   it("rejects production mutations without explicit confirmation", async () => {

@@ -34,6 +34,17 @@ describe("MCP tool definitions", () => {
     expect(tools.find((tool) => tool.name === "order_get_v2")?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(tools.find((tool) => tool.name === "order_refund_basket")?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
   });
+
+  it("requires exactly one non-empty selector for menu helpers", () => {
+    const tool = buildToolDefinitions().find((candidate) => candidate.name === "menu_get_item")!;
+    expect(tool.inputSchema.oneOf).toEqual([
+      { required: ["id"] },
+      { required: ["external_id"] },
+      { required: ["gtin"] },
+      { required: ["sku"] }
+    ]);
+    expect(tool.inputSchema.properties.sku).toMatchObject({ minLength: 1 });
+  });
 });
 
 describe("tool runtime", () => {
@@ -78,5 +89,20 @@ describe("tool runtime", () => {
       .resolves.toMatchObject({ count: 1 });
     await expect(runtime.execute("menu_get_qty_on_stock", { environment: "test", venueId: "v", sku: "A" }))
       .resolves.toMatchObject({ matches: 1, items: [{ quantity: 4 }] });
+  });
+
+  it("rejects invalid helper selectors before making a network request", async () => {
+    const menuService = {
+      getMenu: vi.fn(async () => ({ items: [] }))
+    } as unknown as MenuService;
+    const runtime = createToolRuntime({ client: {} as WoltClient, menuService });
+
+    await expect(runtime.execute("menu_get_item", {
+      environment: "test",
+      venueId: "venue-1",
+      sku: "SKU-1",
+      gtin: "GTIN-1"
+    })).rejects.toThrow(/Invalid arguments/);
+    expect(menuService.getMenu).not.toHaveBeenCalled();
   });
 });

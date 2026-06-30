@@ -17,20 +17,126 @@ export const ORDER_SUBMITTER_SCHEMA = {
       required: ["id"],
       properties: { id: { type: "string" }, name: { type: "string" } }
     },
-    items: { type: "array", items: { type: "object", additionalProperties: true } },
+    price: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        amount: { type: "integer" },
+        currency: { type: "string" }
+      }
+    },
+    delivery: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        status: {
+          type: "string",
+          enum: ["estimated", "assigned", "courier_at_venue", "picked_up", "courier_at_delivery_location", "delivered"]
+        },
+        type: { type: "string", enum: ["takeaway", "homedelivery", "eatin"] },
+        time: { type: ["string", "null"] },
+        self_delivery: { type: "boolean" }
+      }
+    },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          count: { type: "integer" },
+          pos_id: { type: ["string", "null"] },
+          row_number: { type: "integer" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                value: { type: "string" },
+                count: { type: "integer" },
+                pos_id: { type: ["string", "null"] },
+                value_pos_id: { type: ["string", "null"] },
+                price: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    amount: { type: "integer" },
+                    currency: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          category: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" }
+            }
+          },
+          substitution_settings: {
+            type: "object",
+            additionalProperties: true,
+            properties: { is_allowed: { type: "boolean" } }
+          },
+          total_price: {
+            type: "object",
+            additionalProperties: true,
+            properties: { amount: { type: "integer" }, currency: { type: "string" } }
+          },
+          unit_price: {
+            type: "object",
+            additionalProperties: true,
+            properties: { amount: { type: "integer" }, currency: { type: "string" } }
+          },
+          base_price: {
+            type: "object",
+            additionalProperties: true,
+            properties: { amount: { type: "integer" }, currency: { type: "string" } }
+          },
+          weight_details: {
+            type: ["object", "null"],
+            additionalProperties: true,
+            properties: {
+              weight_in_grams: { type: "integer" },
+              requested_amount: { type: "integer" },
+              extra_weight_percentage: { type: "integer" }
+            }
+          },
+          sku: { type: ["string", "null"] },
+          gtin: { type: ["string", "null"] },
+          item_type: { type: "string", enum: ["order-item", "order-retail-item"] }
+        }
+      }
+    },
     created_at: { type: "string" },
-    modified_at: { type: ["string", "null"] },
+    modified_at: { type: "string" },
+    pickup_eta: { type: "string" },
     order_number: { type: "string" },
-    order_status: { type: "string" },
+    order_status: {
+      type: "string",
+      enum: ["received", "fetched", "acknowledged", "production", "ready", "delivered", "rejected", "other"]
+    },
     type: { type: "string", enum: ["preorder", "instant"] },
     consumer_comment: { type: ["string", "null"] },
-    consumer_name: { type: ["string", "null"] },
+    consumer_name: { type: "string" },
     consumer_phone_number: { type: ["string", "null"] },
-    attribution_id: { type: ["string", "null"] },
+    attribution_id: { type: "string" },
     company_tax_id: { type: ["string", "null"] },
-    price: { type: "object", additionalProperties: true },
-    delivery: { type: "object", additionalProperties: true },
-    pre_order: { type: ["object", "null"], additionalProperties: true }
+    pre_order: {
+      type: ["object", "null"],
+      additionalProperties: true,
+      properties: {
+        preorder_time: { type: "string" },
+        pre_order_status: { type: "string", enum: ["confirmed", "waiting"] }
+      }
+    }
   }
 } as const;
 
