@@ -1,0 +1,23 @@
+{
+  "name": "wolt",
+  "version": "0.1.0",
+  "description": "Operate the documented Wolt marketplace and Drive API catalog through a local MCP server.",
+  "author": {
+    "name": "nirbelachnes"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Wolt",
+    "shortDescription": "Manage Wolt menus, venues, orders, and deliveries.",
+    "longDescription": "A portable local MCP and skill covering Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter contracts with explicit environment and production safety controls.",
+    "developerName": "nirbelachnes",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "Check a Wolt venue and summarize its current status.",
+      "Find a Wolt menu item and inspect its live stock data.",
+      "Prepare a safe Wolt test-environment menu update."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
