@@ -7,11 +7,11 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Nirbel/walt-mcp.git"
+    "url": "git+https://github.com/Nirbel/wolt-mcp.git"
   },
-  "homepage": "https://github.com/Nirbel/walt-mcp#readme",
+  "homepage": "https://github.com/Nirbel/wolt-mcp#readme",
   "bugs": {
-    "url": "https://github.com/Nirbel/walt-mcp/issues"
+    "url": "https://github.com/Nirbel/wolt-mcp/issues"
   },
   "keywords": [
     "wolt",

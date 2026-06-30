@@ -1,6 +1,6 @@
 # Wolt MCP + Codex skill
 
-[![CI](https://github.com/Nirbel/walt-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nirbel/walt-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/Nirbel/wolt-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nirbel/wolt-mcp/actions/workflows/ci.yml)
 
 A local, stdio-based Model Context Protocol server and Codex plugin for Wolt marketplace and Wolt Drive integrations. It exposes 38 operations from Wolt's Menu, Venue, Order, Timeslot, and Drive APIs, plus three focused helpers for menu-item lookup, stock inspection, and Order Submitter validation.
 
@@ -101,8 +101,8 @@ Marketplace access tokens and Drive merchant keys are sent as Bearer credentials
 ### 1. Clone the repository
 
 ```sh
-git clone https://github.com/Nirbel/walt-mcp.git
-cd walt-mcp
+git clone https://github.com/Nirbel/wolt-mcp.git
+cd wolt-mcp
 ```
 
 The committed bundle is ready to run:
@@ -120,8 +120,8 @@ Add the following to `~/.codex/config.toml`, replacing the two absolute paths:
 ```toml
 [mcp_servers.wolt]
 command = "node"
-args = ["/ABSOLUTE/PATH/TO/walt-mcp/dist/server.js"]
-cwd = "/ABSOLUTE/PATH/TO/walt-mcp"
+args = ["/ABSOLUTE/PATH/TO/wolt-mcp/dist/server.js"]
+cwd = "/ABSOLUTE/PATH/TO/wolt-mcp"
 env_vars = [
   "WOLT_MARKETPLACE_TOKEN_TEST",
   "WOLT_MARKETPLACE_TOKEN_PRODUCTION",

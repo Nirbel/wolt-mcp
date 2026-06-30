@@ -6,7 +6,7 @@ The project is pre-release. Security fixes are applied to the latest commit on `
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a vulnerability. Use [GitHub's private security advisory form](https://github.com/Nirbel/walt-mcp/security/advisories/new) and include:
+Do not open a public issue for a vulnerability. Use [GitHub's private security advisory form](https://github.com/Nirbel/wolt-mcp/security/advisories/new) and include:
 
 - affected version or commit;
 - impact and realistic attack scenario;
