@@ -15646,12 +15646,14 @@ var MenuService = class {
     if (!isObject2(requested.data)) throw new Error("Wolt returned a malformed asynchronous menu response");
     const resourceUrl = assertAllowedResourceUrl(requested.data.resource_url);
     const startedAt = this.#now();
-    while (this.#now() - startedAt < timeoutMs) {
+    while (true) {
+      const requestRemainingMs = timeoutMs - (this.#now() - startedAt);
+      if (requestRemainingMs <= 0) break;
       const response = await this.#fetcher(resourceUrl, {
         method: "GET",
         headers: { accept: "application/json" },
         redirect: "error",
-        signal: AbortSignal.timeout(Math.min(timeoutMs, 15e3))
+        signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15e3))
       });
       if (!response.ok) throw new Error(`Wolt menu resource returned HTTP ${response.status}`);
       let result;
