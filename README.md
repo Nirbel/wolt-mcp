@@ -106,7 +106,7 @@ Add the GitHub marketplace, then install the plugin:
 
 ```sh
 codex plugin marketplace add Nirbel/wolt-mcp
-codex plugin add wolt@nirbel-wolt
+codex plugin add wolt@wolt-mcp
 ```
 
 Start a new Codex thread after installation. The plugin contributes both the Wolt skill and all 41 MCP tools. For a private repository, the installing user must have GitHub access through their normal Git credentials.
@@ -117,13 +117,13 @@ Add the same repository as a Claude Code marketplace and install Wolt:
 
 ```sh
 claude plugin marketplace add Nirbel/wolt-mcp
-claude plugin install wolt@nirbel-wolt
+claude plugin install wolt@wolt-mcp
 ```
 
 To enable it for everyone working in a trusted project instead of only the current user:
 
 ```sh
-claude plugin install wolt@nirbel-wolt --scope project
+claude plugin install wolt@wolt-mcp --scope project
 ```
 
 Start a new Claude Code session or run `/reload-plugins`. The Wolt skill is namespaced as `/wolt:wolt`; the MCP server starts automatically while the plugin is enabled.

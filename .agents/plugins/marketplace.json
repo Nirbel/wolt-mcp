@@ -1,7 +1,7 @@
 {
-  "name": "nirbel-wolt",
+  "name": "wolt-mcp",
   "interface": {
-    "displayName": "Nirbel Wolt"
+    "displayName": "Wolt MCP"
   },
   "plugins": [
     {

@@ -23,7 +23,7 @@ describe("cross-client distribution", () => {
   it("publishes a Codex marketplace entry for the packaged Wolt plugin", async () => {
     const marketplace = await json(".agents/plugins/marketplace.json");
     expect(marketplace).toMatchObject({
-      name: "nirbel-wolt",
+      name: "wolt-mcp",
       plugins: [{
         name: "wolt",
         source: { source: "local", path: "./plugins/wolt" },
@@ -36,7 +36,7 @@ describe("cross-client distribution", () => {
   it("publishes a Claude Code marketplace entry for the same plugin", async () => {
     const marketplace = await json(".claude-plugin/marketplace.json");
     expect(marketplace).toMatchObject({
-      name: "nirbel-wolt",
+      name: "wolt-mcp",
       owner: { name: "Nirbel" },
       plugins: [{ name: "wolt", source: "./plugins/wolt", version: "0.1.0" }]
     });
