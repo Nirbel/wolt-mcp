@@ -42,6 +42,28 @@ describe("cross-client distribution", () => {
     });
   });
 
+  it("labels every public distribution description as unofficial", async () => {
+    const packageJson = await json("package.json");
+    const claudeMarketplace = await json(".claude-plugin/marketplace.json");
+    const codexManifest = await json("plugins/wolt/.codex-plugin/plugin.json");
+    const claudeManifest = await json("plugins/wolt/.claude-plugin/plugin.json");
+    const readme = await readFile(resolve(root, "README.md"), "utf8");
+    const skill = await readFile(resolve(root, "skills/wolt/SKILL.md"), "utf8");
+    const skillUi = await readFile(resolve(root, "skills/wolt/agents/openai.yaml"), "utf8");
+
+    const descriptions = [
+      packageJson.description,
+      claudeMarketplace.description,
+      claudeMarketplace.plugins[0].description,
+      codexManifest.description,
+      claudeManifest.description
+    ];
+    expect(descriptions).toEqual(descriptions.map(() => expect.stringMatching(/unofficial/i)));
+    expect(readme).toMatch(/unofficial integration/i);
+    expect(skill).toMatch(/^description: .*unofficial/im);
+    expect(skillUi).toMatch(/short_description: .*unofficial/i);
+  });
+
   it("packages one adaptive MCP launch configuration for both hosts", async () => {
     const codexManifest = await json("plugins/wolt/.codex-plugin/plugin.json");
     const claudeManifest = await json("plugins/wolt/.claude-plugin/plugin.json");

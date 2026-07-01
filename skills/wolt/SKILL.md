@@ -1,6 +1,6 @@
 ---
 name: wolt
-description: Operate Wolt marketplace and Drive integrations through the bundled MCP. Use for Wolt menus, item inventory, venue status and hours, order fulfillment and refunds, timeslot capacity, Drive deliveries and quotes, or Order Submitter payload validation.
+description: Operate Wolt marketplace and Drive integrations through the bundled unofficial MCP. Use for Wolt menus, item inventory, venue status and hours, order fulfillment and refunds, timeslot capacity, Drive deliveries and quotes, or Order Submitter payload validation.
 ---
 
 # Wolt

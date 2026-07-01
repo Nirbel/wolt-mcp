@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Nirbel/wolt-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nirbel/wolt-mcp/actions/workflows/ci.yml)
 
-A local, stdio-based Model Context Protocol server and Codex plugin for Wolt marketplace and Wolt Drive integrations. It exposes 38 operations from Wolt's Menu, Venue, Order, Timeslot, and Drive APIs, plus three focused helpers for menu-item lookup, stock inspection, and Order Submitter validation.
+An unofficial, community-built, stdio-based Model Context Protocol server and Codex plugin for Wolt marketplace and Wolt Drive integrations. It exposes 38 operations from Wolt's Menu, Venue, Order, Timeslot, and Drive APIs, plus three focused helpers for menu-item lookup, stock inspection, and Order Submitter validation.
 
 > [!IMPORTANT]
 > This is an unofficial integration and is not affiliated with or endorsed by Wolt. You need credentials and API access issued by Wolt. The project is currently a private, unlicensed `0.1.0` pre-release; choose and add a license before making the repository public.

@@ -18,7 +18,7 @@ async function packagePlugins() {
     name: "wolt",
     displayName: "Wolt MCP",
     version: "0.1.0",
-    description: "Operate Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter integrations through MCP.",
+    description: "Unofficial MCP integration for Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter APIs.",
     author: {
       name: "Nirbel",
       url: "https://github.com/Nirbel"
