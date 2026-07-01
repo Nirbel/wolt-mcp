@@ -64,6 +64,18 @@ describe("cross-client distribution", () => {
     expect(skillUi).toMatch(/short_description: .*unofficial/i);
   });
 
+  it("documents Wolt OAuth token exchange and refresh rotation", async () => {
+    const readme = await readFile(resolve(root, "README.md"), "utf8");
+
+    expect(readme).toContain("https://developer.wolt.com/docs/authentication20");
+    expect(readme).toContain("https://integrations-authentication-service.development.dev.woltapi.com/oauth2/token");
+    expect(readme).toContain("https://integrations-authentication-service.wolt.com/oauth2/token");
+    expect(readme).toContain("grant_type=authorization_code");
+    expect(readme).toContain("grant_type=refresh_token");
+    expect(readme).toMatch(/refresh token is single-use/i);
+    expect(readme).toMatch(/does not refresh tokens automatically/i);
+  });
+
   it("packages one adaptive MCP launch configuration for both hosts", async () => {
     const codexManifest = await json("plugins/wolt/.codex-plugin/plugin.json");
     const claudeManifest = await json("plugins/wolt/.claude-plugin/plugin.json");
