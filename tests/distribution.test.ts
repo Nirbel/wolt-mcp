@@ -64,7 +64,7 @@ describe("cross-client distribution", () => {
     expect(skillUi).toMatch(/short_description: .*unofficial/i);
   });
 
-  it("documents Wolt OAuth token exchange and refresh rotation", async () => {
+  it("documents Wolt OAuth token exchange and automatic refresh rotation", async () => {
     const readme = await readFile(resolve(root, "README.md"), "utf8");
 
     expect(readme).toContain("https://developer.wolt.com/docs/authentication20");
@@ -73,7 +73,30 @@ describe("cross-client distribution", () => {
     expect(readme).toContain("grant_type=authorization_code");
     expect(readme).toContain("grant_type=refresh_token");
     expect(readme).toMatch(/refresh token is single-use/i);
-    expect(readme).toMatch(/does not refresh tokens automatically/i);
+    expect(readme).toMatch(/automatic refresh mode is recommended for autonomous agents/i);
+    expect(readme).toMatch(/bootstrap refresh token becomes stale/i);
+    expect(readme).toMatch(/do not share.*refresh token.*multiple machines/is);
+    expect(readme).toMatch(/external credential broker|transactional shared secret store/i);
+    expect(readme).toContain("WOLT_MARKETPLACE_TOKEN_STORE");
+    for (const environment of ["TEST", "PRODUCTION"]) {
+      expect(readme).toContain(`WOLT_MARKETPLACE_CLIENT_ID_${environment}`);
+      expect(readme).toContain(`WOLT_MARKETPLACE_CLIENT_SECRET_${environment}`);
+      expect(readme).toContain(`WOLT_MARKETPLACE_REFRESH_TOKEN_${environment}`);
+    }
+  });
+
+  it("ships static and automatic-refresh MCP configuration examples", async () => {
+    const packageJson = await json("package.json");
+    const staticExample = await json("examples/static-token.mcp.json");
+    const oauthExample = await json("examples/oauth-refresh.mcp.json");
+
+    expect(packageJson.files).toContain("examples");
+    expect(staticExample.mcpServers.wolt.env).toHaveProperty("WOLT_MARKETPLACE_TOKEN_TEST");
+    expect(oauthExample.mcpServers.wolt.env).toMatchObject({
+      WOLT_MARKETPLACE_CLIENT_ID_TEST: "replace-with-client-id",
+      WOLT_MARKETPLACE_CLIENT_SECRET_TEST: "replace-with-client-secret",
+      WOLT_MARKETPLACE_REFRESH_TOKEN_TEST: "replace-with-current-refresh-token"
+    });
   });
 
   it("packages one adaptive MCP launch configuration for both hosts", async () => {
@@ -92,6 +115,12 @@ describe("cross-client distribution", () => {
   it("packages the exact standalone server and skill inside the plugin", async () => {
     expect(await digest(resolve(pluginRoot, "dist/server.js"))).toBe(await digest(resolve(root, "dist/server.js")));
     expect(await digest(resolve(pluginRoot, "skills/wolt/SKILL.md"))).toBe(await digest(resolve(root, "skills/wolt/SKILL.md")));
+    expect(await digest(resolve(pluginRoot, "examples/static-token.mcp.json"))).toBe(
+      await digest(resolve(root, "examples/static-token.mcp.json"))
+    );
+    expect(await digest(resolve(pluginRoot, "examples/oauth-refresh.mcp.json"))).toBe(
+      await digest(resolve(root, "examples/oauth-refresh.mcp.json"))
+    );
   });
 
   it.each(["codex", "claude"])("handshakes through the packaged %s launcher", async (host) => {

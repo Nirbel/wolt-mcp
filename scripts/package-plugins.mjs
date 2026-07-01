@@ -50,6 +50,7 @@ async function packagePlugins() {
   await cp(resolve(root, "dist/server.js"), resolve(output, "dist/server.js"));
   await chmod(resolve(output, "dist/server.js"), 0o755);
   await cp(resolve(root, "skills"), resolve(output, "skills"), { recursive: true });
+  await cp(resolve(root, "examples"), resolve(output, "examples"), { recursive: true });
   await cp(resolve(root, "README.md"), resolve(output, "README.md"));
   await writeJson(resolve(output, ".codex-plugin/plugin.json"), codexManifest);
   await writeJson(resolve(output, ".claude-plugin/plugin.json"), claudeManifest);

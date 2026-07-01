@@ -15449,6 +15449,342 @@ var Server = class extends Protocol {
   }
 };
 
+// src/marketplace-token-manager.ts
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+var STATIC_TOKEN_NAMES = {
+  test: "WOLT_MARKETPLACE_TOKEN_TEST",
+  production: "WOLT_MARKETPLACE_TOKEN_PRODUCTION"
+};
+var OAUTH_NAMES = {
+  test: {
+    clientId: "WOLT_MARKETPLACE_CLIENT_ID_TEST",
+    clientSecret: "WOLT_MARKETPLACE_CLIENT_SECRET_TEST",
+    refreshToken: "WOLT_MARKETPLACE_REFRESH_TOKEN_TEST"
+  },
+  production: {
+    clientId: "WOLT_MARKETPLACE_CLIENT_ID_PRODUCTION",
+    clientSecret: "WOLT_MARKETPLACE_CLIENT_SECRET_PRODUCTION",
+    refreshToken: "WOLT_MARKETPLACE_REFRESH_TOKEN_PRODUCTION"
+  }
+};
+var OAUTH_ENDPOINTS = {
+  test: "https://integrations-authentication-service.development.dev.woltapi.com/oauth2/token",
+  production: "https://integrations-authentication-service.wolt.com/oauth2/token"
+};
+var STORE_VERSION = 1;
+var DEFAULT_REFRESH_SKEW_MS = 6e4;
+var DEFAULT_LOCK_RETRY_MS = 25;
+var DEFAULT_LOCK_TIMEOUT_MS = 2e4;
+var DEFAULT_STALE_LOCK_MS = 3e4;
+function nonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+function clientIdFingerprint(clientId) {
+  return createHash("sha256").update(clientId).digest("hex");
+}
+function asErrorCode(error2) {
+  return typeof error2 === "object" && error2 !== null && "code" in error2 ? String(error2.code) : void 0;
+}
+function resolveOAuthTokenEndpoint(environment2) {
+  return OAUTH_ENDPOINTS[environment2];
+}
+function resolveDefaultTokenStore(env = process.env, platform = process.platform, home = homedir()) {
+  const override = env.WOLT_MARKETPLACE_TOKEN_STORE?.trim();
+  if (override) return override;
+  if (platform === "darwin") return join(home, "Library", "Application Support", "wolt-mcp", "oauth-tokens.json");
+  if (platform === "win32") {
+    const base = env.LOCALAPPDATA?.trim() || join(home, "AppData", "Local");
+    return join(base, "wolt-mcp", "oauth-tokens.json");
+  }
+  const stateHome = env.XDG_STATE_HOME?.trim() || join(home, ".local", "state");
+  return join(stateHome, "wolt-mcp", "oauth-tokens.json");
+}
+function isTokenProfile(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const profile = value;
+  return nonEmpty(profile.client_id_fingerprint) && nonEmpty(profile.access_token) && nonEmpty(profile.refresh_token) && typeof profile.expires_at === "number" && Number.isFinite(profile.expires_at);
+}
+function parseStore(raw, statePath) {
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid Wolt OAuth token store JSON at ${statePath}`);
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Invalid Wolt OAuth token store at ${statePath}`);
+  }
+  const record2 = value;
+  if (record2.version !== STORE_VERSION || typeof record2.profiles !== "object" || record2.profiles === null) {
+    throw new Error(`Unsupported Wolt OAuth token store at ${statePath}`);
+  }
+  const profiles = record2.profiles;
+  for (const environment2 of ["test", "production"]) {
+    if (profiles[environment2] !== void 0 && !isTokenProfile(profiles[environment2])) {
+      throw new Error(`Invalid ${environment2} profile in Wolt OAuth token store at ${statePath}`);
+    }
+  }
+  return value;
+}
+function validateTokenResponse(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Wolt OAuth token endpoint returned an invalid response");
+  }
+  const record2 = value;
+  if (!nonEmpty(record2.access_token)) throw new Error("Wolt OAuth token response is missing access_token");
+  if (!nonEmpty(record2.refresh_token)) throw new Error("Wolt OAuth token response is missing refresh_token");
+  if (typeof record2.expires_in !== "number" || !Number.isFinite(record2.expires_in) || record2.expires_in <= 0) {
+    throw new Error("Wolt OAuth token response has invalid expires_in");
+  }
+  if (!nonEmpty(record2.token_type) || record2.token_type.toLowerCase() !== "bearer") {
+    throw new Error("Wolt OAuth token response has unsupported token_type");
+  }
+  return {
+    accessToken: record2.access_token,
+    refreshToken: record2.refresh_token,
+    expiresIn: record2.expires_in
+  };
+}
+var MarketplaceTokenManager = class {
+  #env;
+  #fetcher;
+  #statePath;
+  #now;
+  #refreshSkewMs;
+  #lockRetryMs;
+  #lockTimeoutMs;
+  #staleLockMs;
+  #refreshes = /* @__PURE__ */ new Map();
+  constructor(options = {}) {
+    this.#env = options.env ?? process.env;
+    this.#fetcher = options.fetcher ?? fetch;
+    this.#statePath = options.statePath ?? resolveDefaultTokenStore(this.#env);
+    this.#now = options.now ?? Date.now;
+    this.#refreshSkewMs = options.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
+    this.#lockRetryMs = options.lockRetryMs ?? DEFAULT_LOCK_RETRY_MS;
+    this.#lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+    this.#staleLockMs = options.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  }
+  async getAccessToken(environment2) {
+    const config2 = this.#oauthConfig(environment2);
+    if (!config2) return this.#staticToken(environment2);
+    const profile = await this.#readProfile(environment2, config2.clientId);
+    if (profile && profile.expires_at > this.#now() + this.#refreshSkewMs) return profile.access_token;
+    return this.#singleFlightRefresh(environment2, config2);
+  }
+  async refreshAfterUnauthorized(environment2, rejectedAccessToken) {
+    const config2 = this.#oauthConfig(environment2);
+    if (!config2) return null;
+    return this.#singleFlightRefresh(environment2, config2, rejectedAccessToken);
+  }
+  #oauthConfig(environment2) {
+    const names = OAUTH_NAMES[environment2];
+    const clientId = this.#env[names.clientId]?.trim();
+    const clientSecret = this.#env[names.clientSecret]?.trim();
+    const bootstrapRefreshToken = this.#env[names.refreshToken]?.trim();
+    const oauthConfigured = Boolean(clientId || clientSecret || bootstrapRefreshToken);
+    if (!oauthConfigured) return null;
+    if (!clientId || !clientSecret) {
+      const missing = [
+        ...!clientId ? [names.clientId] : [],
+        ...!clientSecret ? [names.clientSecret] : []
+      ];
+      throw new Error(`Incomplete Wolt Marketplace OAuth configuration for ${environment2}: set ${missing.join(" and ")}`);
+    }
+    return {
+      clientId,
+      clientSecret,
+      ...bootstrapRefreshToken ? { bootstrapRefreshToken } : {}
+    };
+  }
+  #staticToken(environment2) {
+    const name = STATIC_TOKEN_NAMES[environment2];
+    const token = this.#env[name]?.trim();
+    if (!token) throw new Error(`Missing Wolt credential: set ${name}`);
+    return token;
+  }
+  async #singleFlightRefresh(environment2, config2, rejectedAccessToken) {
+    const running = this.#refreshes.get(environment2);
+    if (running) return running;
+    const refresh = this.#refreshWithLock(environment2, config2, rejectedAccessToken).finally(() => {
+      if (this.#refreshes.get(environment2) === refresh) this.#refreshes.delete(environment2);
+    });
+    this.#refreshes.set(environment2, refresh);
+    return refresh;
+  }
+  async #refreshWithLock(environment2, config2, rejectedAccessToken) {
+    return this.#withFileLock(async () => {
+      const profile = await this.#readProfile(environment2, config2.clientId);
+      if (profile) {
+        if (rejectedAccessToken !== void 0 && profile.access_token !== rejectedAccessToken) return profile.access_token;
+        if (rejectedAccessToken === void 0 && profile.expires_at > this.#now() + this.#refreshSkewMs) {
+          return profile.access_token;
+        }
+      }
+      const refreshToken = profile?.refresh_token ?? config2.bootstrapRefreshToken;
+      if (!refreshToken) {
+        throw new Error(
+          `Wolt Marketplace OAuth for ${environment2} needs ${OAUTH_NAMES[environment2].refreshToken} because no matching stored refresh token exists`
+        );
+      }
+      const token = await this.#requestRefresh(environment2, config2, refreshToken, profile?.access_token);
+      const nextProfile = {
+        client_id_fingerprint: clientIdFingerprint(config2.clientId),
+        access_token: token.accessToken,
+        refresh_token: token.refreshToken,
+        expires_at: this.#now() + token.expiresIn * 1e3
+      };
+      await this.#writeProfile(environment2, nextProfile);
+      return nextProfile.access_token;
+    });
+  }
+  async #requestRefresh(environment2, config2, refreshToken, previousAccessToken) {
+    const encodedAuthorization = Buffer.from(`${config2.clientId}:${config2.clientSecret}`).toString("base64");
+    const authorization = `Basic ${encodedAuthorization}`;
+    const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }).toString();
+    const encodedRefreshToken = new URLSearchParams({ refresh_token: refreshToken }).toString().slice("refresh_token=".length);
+    const secrets = [
+      config2.clientSecret,
+      refreshToken,
+      encodedRefreshToken,
+      previousAccessToken,
+      config2.bootstrapRefreshToken,
+      authorization,
+      encodedAuthorization,
+      body
+    ].filter(nonEmpty);
+    let response;
+    try {
+      response = await this.#fetcher(resolveOAuthTokenEndpoint(environment2), {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization,
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        body,
+        redirect: "error",
+        signal: AbortSignal.timeout(15e3)
+      });
+    } catch (error2) {
+      throw new Error(`Wolt OAuth refresh failed for ${environment2}: ${this.#sanitize(error2, secrets)}`);
+    }
+    let text;
+    try {
+      text = await response.text();
+    } catch (error2) {
+      throw new Error(`Wolt OAuth refresh response failed for ${environment2}: ${this.#sanitize(error2, secrets)}`);
+    }
+    if (!response.ok) {
+      throw new Error(`Wolt OAuth refresh failed for ${environment2} with HTTP ${response.status}: ${this.#sanitize(text, secrets)}`);
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Wolt OAuth token endpoint returned invalid JSON for ${environment2}`);
+    }
+    try {
+      return validateTokenResponse(data);
+    } catch (error2) {
+      throw new Error(`${this.#sanitize(error2, secrets)} for ${environment2}`);
+    }
+  }
+  #sanitize(value, secrets) {
+    let message = value instanceof Error ? value.message : String(value);
+    for (const secret of secrets) if (secret) message = message.replaceAll(secret, "[REDACTED]");
+    return message.slice(0, 2e3);
+  }
+  async #readStore() {
+    try {
+      return parseStore(await readFile(this.#statePath, "utf8"), this.#statePath);
+    } catch (error2) {
+      if (asErrorCode(error2) === "ENOENT") return { version: STORE_VERSION, profiles: {} };
+      throw error2;
+    }
+  }
+  async #readProfile(environment2, clientId) {
+    const profile = (await this.#readStore()).profiles[environment2];
+    if (!profile || profile.client_id_fingerprint !== clientIdFingerprint(clientId)) return void 0;
+    return profile;
+  }
+  async #writeProfile(environment2, profile) {
+    const store = await this.#readStore();
+    store.profiles[environment2] = profile;
+    const directory = dirname(this.#statePath);
+    await mkdir(directory, { recursive: true, mode: 448 });
+    await chmod(directory, 448).catch(() => void 0);
+    const temporaryPath = `${this.#statePath}.${process.pid}.${randomUUID()}.tmp`;
+    const handle = await open(temporaryPath, "wx", 384);
+    try {
+      try {
+        await handle.writeFile(`${JSON.stringify(store, null, 2)}
+`, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    } catch (error2) {
+      await unlink(temporaryPath).catch(() => void 0);
+      throw error2;
+    }
+    try {
+      await rename(temporaryPath, this.#statePath);
+      await chmod(this.#statePath, 384).catch(() => void 0);
+    } catch (error2) {
+      await unlink(temporaryPath).catch(() => void 0);
+      throw error2;
+    }
+  }
+  async #withFileLock(action) {
+    const directory = dirname(this.#statePath);
+    await mkdir(directory, { recursive: true, mode: 448 });
+    await chmod(directory, 448).catch(() => void 0);
+    const lockPath = `${this.#statePath}.lock`;
+    const deadline = Date.now() + this.#lockTimeoutMs;
+    let handle;
+    while (!handle) {
+      try {
+        handle = await open(lockPath, "wx", 384);
+      } catch (error2) {
+        if (asErrorCode(error2) !== "EEXIST") throw error2;
+        try {
+          const lockStat = await stat(lockPath);
+          if (Date.now() - lockStat.mtimeMs > this.#staleLockMs) {
+            await unlink(lockPath);
+            continue;
+          }
+        } catch (statError) {
+          if (asErrorCode(statError) === "ENOENT") continue;
+          throw statError;
+        }
+        if (Date.now() >= deadline) throw new Error(`Timed out waiting for Wolt OAuth token-store lock at ${lockPath}`);
+        await delay(this.#lockRetryMs);
+      }
+    }
+    try {
+      await handle.writeFile(JSON.stringify({ pid: process.pid, created_at: Date.now() }), "utf8");
+      await handle.sync();
+    } catch (error2) {
+      await handle.close().catch(() => void 0);
+      await unlink(lockPath).catch(() => void 0);
+      throw error2;
+    }
+    try {
+      return await action();
+    } finally {
+      await handle.close().catch(() => void 0);
+      await unlink(lockPath).catch(() => void 0);
+    }
+  }
+};
+
 // src/client.ts
 var BASE_URLS = {
   marketplace: {
@@ -15491,36 +15827,33 @@ function interpolatePath(path, pathParams) {
 var WoltClient = class {
   #fetcher;
   #env;
+  #tokenManager;
   constructor(options = {}) {
     this.#fetcher = options.fetcher ?? fetch;
     this.#env = options.env ?? process.env;
+    this.#tokenManager = options.tokenManager ?? new MarketplaceTokenManager({
+      fetcher: this.#fetcher,
+      env: this.#env
+    });
   }
   async request(request) {
     if (request.environment === "production" && request.method !== "GET" && !request.confirmProduction) {
       throw new Error("Production mutations require confirm_production: true");
     }
-    const token = resolveCredential(request.auth, request.environment, this.#env);
     const url = resolveBaseUrl(request.auth, request.environment) + interpolatePath(request.path, request.pathParams);
-    const headers = {
-      accept: "application/json",
-      authorization: `Bearer ${token}`
-    };
-    const init = {
-      method: request.method,
-      headers,
-      redirect: "error",
-      signal: AbortSignal.timeout(request.timeoutMs ?? 15e3)
-    };
-    if (request.payload !== void 0) {
-      headers["content-type"] = "application/json";
-      init.body = JSON.stringify(request.payload);
-    }
-    let response;
-    try {
-      response = await this.#fetcher(url, init);
-    } catch (error2) {
-      const message = error2 instanceof Error ? error2.message : String(error2);
-      throw new Error(`Wolt request failed before receiving a response: ${message.replaceAll(token, "[REDACTED]")}`);
+    let token = request.auth === "marketplace" ? await this.#tokenManager.getAccessToken(request.environment) : resolveCredential(request.auth, request.environment, this.#env);
+    const secrets = [token];
+    let response = await this.#send(url, request, token);
+    if (response.status === 401 && request.auth === "marketplace") {
+      const replacement = await this.#tokenManager.refreshAfterUnauthorized(request.environment, token);
+      if (replacement) {
+        secrets.push(replacement);
+        if (request.method === "GET") {
+          await response.body?.cancel().catch(() => void 0);
+          token = replacement;
+          response = await this.#send(url, request, token);
+        }
+      }
     }
     const contentType = response.headers.get("content-type") ?? "";
     const text = response.status === 204 ? "" : await response.text();
@@ -15538,9 +15871,36 @@ var WoltClient = class {
     }
     if (!response.ok) {
       const detail = typeof data === "string" ? data : JSON.stringify(data);
-      throw new Error(`Wolt API returned HTTP ${response.status}: ${detail.replaceAll(token, "[REDACTED]")}`);
+      throw new Error(`Wolt API returned HTTP ${response.status}: ${this.#sanitize(detail, secrets)}`);
     }
     return { status: response.status, accepted: response.status === 202 || response.status === 204, data };
+  }
+  async #send(url, request, token) {
+    const headers = {
+      accept: "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const init = {
+      method: request.method,
+      headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(request.timeoutMs ?? 15e3)
+    };
+    if (request.payload !== void 0) {
+      headers["content-type"] = "application/json";
+      init.body = JSON.stringify(request.payload);
+    }
+    try {
+      return await this.#fetcher(url, init);
+    } catch (error2) {
+      const message = error2 instanceof Error ? error2.message : String(error2);
+      throw new Error(`Wolt request failed before receiving a response: ${this.#sanitize(message, [token])}`);
+    }
+  }
+  #sanitize(message, secrets) {
+    let sanitized = message;
+    for (const secret of secrets) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
+    return sanitized;
   }
 };
 

@@ -13,6 +13,7 @@
     "plugins/wolt",
     ".agents/plugins",
     ".claude-plugin",
+    "examples",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md"

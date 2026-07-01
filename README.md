@@ -13,7 +13,8 @@ An unofficial, community-built, stdio-based Model Context Protocol server and Co
 - Explicit `test` or `production` selection on every network operation.
 - Production mutations require `confirm_production: true`.
 - Whole-menu replacement always requires `confirm_replace: true`.
-- Marketplace tokens, Drive keys, and webhook secrets come from environment variables—not tool arguments.
+- Marketplace tokens or OAuth refresh credentials, Drive keys, and webhook secrets come from environment variables—not tool arguments.
+- Automatic Marketplace token rotation keeps long-running local agents working across one-hour access-token expiry.
 - Fixed Wolt hosts, request timeouts, redirect blocking, path encoding, and credential-redacted errors.
 - Complete asynchronous menu request/poll handling.
 - Self-contained `dist/server.js`; users do not need `npm install` at runtime.
@@ -89,12 +90,19 @@ Only configure the credentials you actually need:
 | --- | --- |
 | `WOLT_MARKETPLACE_TOKEN_TEST` | Menu, Venue, Order, and Timeslot test calls |
 | `WOLT_MARKETPLACE_TOKEN_PRODUCTION` | Menu, Venue, Order, and Timeslot production calls |
+| `WOLT_MARKETPLACE_CLIENT_ID_TEST` | Test OAuth automatic refresh |
+| `WOLT_MARKETPLACE_CLIENT_SECRET_TEST` | Test OAuth automatic refresh |
+| `WOLT_MARKETPLACE_REFRESH_TOKEN_TEST` | Initial test refresh token used to bootstrap the local store |
+| `WOLT_MARKETPLACE_CLIENT_ID_PRODUCTION` | Production OAuth automatic refresh |
+| `WOLT_MARKETPLACE_CLIENT_SECRET_PRODUCTION` | Production OAuth automatic refresh |
+| `WOLT_MARKETPLACE_REFRESH_TOKEN_PRODUCTION` | Initial production refresh token used to bootstrap the local store |
+| `WOLT_MARKETPLACE_TOKEN_STORE` | Optional absolute path for the local rotated-token store |
 | `WOLT_DRIVE_KEY_TEST` | Wolt Drive test calls |
 | `WOLT_DRIVE_KEY_PRODUCTION` | Wolt Drive production calls |
 | `WOLT_WEBHOOK_SECRET_TEST` | Test Order Submitter signature verification |
 | `WOLT_WEBHOOK_SECRET_PRODUCTION` | Production Order Submitter signature verification |
 
-Marketplace access tokens and Drive merchant keys are sent as Bearer credentials to their respective fixed Wolt hosts. They are never accepted as MCP tool parameters.
+Marketplace access tokens and Drive merchant keys are sent as Bearer credentials to their respective fixed Wolt hosts. They are never accepted as MCP tool parameters. Configure either static Marketplace tokens or automatic OAuth refresh for each environment; you do not need both.
 
 ## Generate a Wolt Marketplace token with OAuth 2.0
 
@@ -135,7 +143,45 @@ curl --fail-with-body --silent --show-error \
   --data-urlencode "code=$WOLT_AUTHORIZATION_CODE"
 ```
 
-Wolt returns an `access_token`, `refresh_token`, `expires_in`, `scope`, and `token_type`. Store both tokens securely. Configure the returned access token for the matching MCP environment:
+Wolt returns an `access_token`, `refresh_token`, `expires_in`, `scope`, and `token_type`. Store both tokens securely.
+
+### Recommended: automatic refresh for autonomous agents
+
+Automatic refresh mode is recommended for autonomous agents. Wolt access tokens last one hour; the MCP refreshes them 60 seconds before expiry and safely rotates Wolt's single-use refresh token.
+
+Configure the matching client credentials and the refresh token returned by the authorization-code exchange. For test:
+
+```sh
+export WOLT_MARKETPLACE_CLIENT_ID_TEST="replace-with-client-id"
+export WOLT_MARKETPLACE_CLIENT_SECRET_TEST="replace-with-client-secret"
+export WOLT_MARKETPLACE_REFRESH_TOKEN_TEST="replace-with-current-refresh-token"
+```
+
+Use the `_PRODUCTION` variables for production credentials. Once the first refresh succeeds, the bootstrap refresh token becomes stale because Wolt refresh tokens are single-use. The MCP writes the replacement pair to its local token store and treats that store as the source of truth; do not keep replacing the environment variable after every hourly refresh.
+
+By default, the owner-only JSON store is written to:
+
+| Platform | Default token store |
+| --- | --- |
+| macOS | `~/Library/Application Support/wolt-mcp/oauth-tokens.json` |
+| Linux | `${XDG_STATE_HOME:-~/.local/state}/wolt-mcp/oauth-tokens.json` |
+| Windows | `%LOCALAPPDATA%\wolt-mcp\oauth-tokens.json` |
+
+Override it with an absolute path when needed:
+
+```sh
+export WOLT_MARKETPLACE_TOKEN_STORE="/secure/local/path/wolt-oauth-tokens.json"
+```
+
+The state contains access and refresh tokens but never the client secret. Writes use a temporary file, flush, and atomic rename; the MCP applies directory mode `0700` and file mode `0600` where the operating system supports them. A process-local single-flight and filesystem lock let multiple Codex and Claude Code MCP processes on one computer share the store without rotating the same token twice.
+
+Do not share the same refresh token or token-store file across multiple machines. Wolt refresh tokens are single-use, so independent machines can invalidate each other's credentials. For multi-machine or server deployment, use an external credential broker or transactional shared secret store instead of local-file mode.
+
+If a client ID changes, its old stored profile is ignored and a fresh `WOLT_MARKETPLACE_REFRESH_TOKEN_*` is required. Partial OAuth configuration is rejected rather than silently falling back to a static token.
+
+### Simple alternative: static access token
+
+For a short-lived or manually managed setup, configure the returned access token directly:
 
 ```sh
 export WOLT_MARKETPLACE_TOKEN_TEST="replace-with-returned-access-token"
@@ -143,9 +189,9 @@ export WOLT_MARKETPLACE_TOKEN_TEST="replace-with-returned-access-token"
 # export WOLT_MARKETPLACE_TOKEN_PRODUCTION="replace-with-returned-access-token"
 ```
 
-Launch or restart Codex/Claude Code from an environment that inherits this variable. Do not commit tokens, paste them into MCP tool arguments, or include them in bug reports.
+Launch or restart Codex/Claude Code from an environment that inherits these variables. Do not commit tokens, paste them into MCP tool arguments, or include them in bug reports.
 
-### Refresh an expired access token
+### Manual refresh for static mode
 
 Wolt access tokens are valid for one hour. Use the access token until it expires, then exchange the current refresh token:
 
@@ -162,7 +208,7 @@ curl --fail-with-body --silent --show-error \
 
 The refresh token is single-use and valid for 30 days. Every successful refresh returns a new access token and a new refresh token; atomically replace the stored pair. Reusing the old refresh token can revoke the newly issued pair. If the refresh token is lost or expires, Wolt requires the venue to be integrated again.
 
-This MCP does not refresh tokens automatically. After refreshing, replace the matching `WOLT_MARKETPLACE_TOKEN_*` value and restart or reload the MCP host. For a deployed integration, perform refresh-token rotation in a secure backend or secrets service rather than in an AI conversation.
+In static mode, replace the matching `WOLT_MARKETPLACE_TOKEN_*` value and restart or reload the MCP host after each refresh. Automatic mode performs this exchange and rotation locally for you.
 
 ## Installation
 
@@ -221,6 +267,13 @@ cwd = "/ABSOLUTE/PATH/TO/wolt-mcp"
 env_vars = [
   "WOLT_MARKETPLACE_TOKEN_TEST",
   "WOLT_MARKETPLACE_TOKEN_PRODUCTION",
+  "WOLT_MARKETPLACE_CLIENT_ID_TEST",
+  "WOLT_MARKETPLACE_CLIENT_SECRET_TEST",
+  "WOLT_MARKETPLACE_REFRESH_TOKEN_TEST",
+  "WOLT_MARKETPLACE_CLIENT_ID_PRODUCTION",
+  "WOLT_MARKETPLACE_CLIENT_SECRET_PRODUCTION",
+  "WOLT_MARKETPLACE_REFRESH_TOKEN_PRODUCTION",
+  "WOLT_MARKETPLACE_TOKEN_STORE",
   "WOLT_DRIVE_KEY_TEST",
   "WOLT_DRIVE_KEY_PRODUCTION",
   "WOLT_WEBHOOK_SECRET_TEST",
@@ -243,9 +296,9 @@ npx -y @YOUR_NPM_SCOPE/wolt-mcp
 
 The npm registry package is not published yet. The GitHub marketplace installation methods above work independently of npm.
 
-### Plaintext `.mcp.json` configuration
+### `.mcp.json` configuration examples
 
-As a less secure alternative, add an `env` object to the `wolt` server entry in `.mcp.json`:
+The repository ships complete examples for [static access tokens](examples/static-token.mcp.json) and [recommended OAuth automatic refresh](examples/oauth-refresh.mcp.json). For example, automatic test refresh uses:
 
 ```json
 {
@@ -256,14 +309,16 @@ As a less secure alternative, add an `env` object to the `wolt` server entry in 
       "cwd": ".",
       "tool_timeout_sec": 150,
       "env": {
-        "WOLT_MARKETPLACE_TOKEN_TEST": "replace-with-token"
+        "WOLT_MARKETPLACE_CLIENT_ID_TEST": "replace-with-client-id",
+        "WOLT_MARKETPLACE_CLIENT_SECRET_TEST": "replace-with-client-secret",
+        "WOLT_MARKETPLACE_REFRESH_TOKEN_TEST": "replace-with-current-refresh-token"
       }
     }
   }
 }
 ```
 
-This stores credentials as plaintext. Never commit or distribute a modified configuration containing real secrets.
+An `env` object stores credentials as plaintext. Inherited shell variables or a secret manager are safer. Never commit or distribute a modified configuration containing real secrets.
 
 ## Calling tools
 
@@ -351,6 +406,8 @@ Wolt's documented v2 menu response includes `inventory_mode` but does not guaran
 - Redirects are blocked so Bearer credentials and polling requests remain on their validated destinations.
 - Menu polling accepts only HTTPS resource URLs on Wolt, Wolt API, or Amazon AWS domains.
 - Requests have bounded timeouts and errors redact the selected credential.
+- Marketplace OAuth state is atomically rotated under a local filesystem lock and never stores the client secret.
+- An unexpected Marketplace `GET` 401 refreshes and retries once; mutations refresh credentials for later calls but are never replayed.
 - Mutations are never retried automatically after ambiguous network failures.
 - HTTP `202` means accepted for processing, not proof that Wolt completed the change.
 - Refunds, replacement, rejection, status transitions, and Drive delivery creation should be treated as consequential operations.
@@ -414,6 +471,8 @@ The generated `specs/wolt-official.json` snapshot preserves source URLs, officia
 ├── .codex-plugin/plugin.json          # Source Codex plugin manifest
 ├── .mcp.json                          # Standalone MCP launch configuration
 ├── dist/server.js                     # Self-contained runtime bundle
+├── docs/design/                       # Approved implementation designs
+├── examples/                          # Static and OAuth MCP configurations
 ├── plugins/wolt/                      # Generated dual-host plugin package
 ├── skills/wolt/                       # Skill and API-family references
 ├── specs/wolt-official.json           # Captured official Wolt contracts
