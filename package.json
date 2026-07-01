@@ -1,10 +1,23 @@
 {
   "name": "wolt-mcp-plugin",
   "version": "0.1.0",
-  "description": "Portable Wolt API MCP server and Codex skill with explicit production safeguards.",
+  "description": "Unofficial Wolt API MCP server and Codex skill with explicit production safeguards.",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
+  "bin": {
+    "wolt-mcp": "./dist/server.js"
+  },
+  "files": [
+    "dist/server.js",
+    "plugins/wolt",
+    ".agents/plugins",
+    ".claude-plugin",
+    "examples",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Nirbel/wolt-mcp.git"
@@ -24,12 +37,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.js --banner:js='#!/usr/bin/env node'",
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.js --banner:js='#!/usr/bin/env node' && node scripts/normalize-bundle.mjs && npm run package:plugins",
+    "package:plugins": "node scripts/package-plugins.mjs",
     "smoke": "node scripts/smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run test && npm run build && npm run smoke"
+    "verify": "npm run build && npm run test && npm run smoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

@@ -18,7 +18,10 @@ Do not include real Wolt credentials, customer data, order payloads, or producti
 ## Security boundaries
 
 - The server is local stdio software and does not provide an HTTP listener.
-- Wolt credentials are read from inherited environment variables.
+- Wolt credentials are read from inherited environment variables. In automatic OAuth mode, rotated Marketplace tokens are also read from and written to the configured local token store.
+- The local token store is plaintext JSON protected with best-effort owner-only permissions (`0700` directory and `0600` file). Anyone who can read it can use the stored Marketplace tokens.
+- Do not place the token store in a synced folder, repository, shared filesystem, or network mount. Do not share one Wolt refresh token across machines.
+- Multi-machine deployments need an external credential broker or transactional shared secret store; local-file locking only coordinates processes on one computer.
 - Production mutation confirmation reduces accidental use; it is not an authorization boundary.
 - The MCP host and local user account remain responsible for tool approvals and filesystem/process security.
 - Wolt remains responsible for authenticating credentials and authorizing venue, merchant, and order access.

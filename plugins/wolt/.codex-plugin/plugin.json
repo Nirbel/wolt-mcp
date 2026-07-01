@@ -12,7 +12,10 @@
     "longDescription": "An unofficial, community-built MCP and skill covering Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter contracts with explicit environment and production safety controls. Not affiliated with or endorsed by Wolt.",
     "developerName": "nirbelachnes",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "defaultPrompt": [
       "Check a Wolt venue and summarize its current status.",
       "Find a Wolt menu item and inspect its live stock data.",

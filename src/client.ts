@@ -1,4 +1,5 @@
 import type { AuthKind, HttpMethod, WoltEnvironment } from "./catalog.js";
+import { MarketplaceTokenManager } from "./marketplace-token-manager.js";
 
 export type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -66,13 +67,24 @@ export type WoltResponse = {
   data: unknown;
 };
 
+export type MarketplaceTokenProvider = Pick<MarketplaceTokenManager, "getAccessToken" | "refreshAfterUnauthorized">;
+
 export class WoltClient {
   readonly #fetcher: Fetcher;
   readonly #env: Record<string, string | undefined>;
+  readonly #tokenManager: MarketplaceTokenProvider;
 
-  constructor(options: { fetcher?: Fetcher; env?: Record<string, string | undefined> } = {}) {
+  constructor(options: {
+    fetcher?: Fetcher;
+    env?: Record<string, string | undefined>;
+    tokenManager?: MarketplaceTokenProvider;
+  } = {}) {
     this.#fetcher = options.fetcher ?? fetch;
     this.#env = options.env ?? process.env;
+    this.#tokenManager = options.tokenManager ?? new MarketplaceTokenManager({
+      fetcher: this.#fetcher,
+      env: this.#env
+    });
   }
 
   async request(request: WoltRequest): Promise<WoltResponse> {
@@ -80,29 +92,23 @@ export class WoltClient {
       throw new Error("Production mutations require confirm_production: true");
     }
 
-    const token = resolveCredential(request.auth, request.environment, this.#env);
     const url = resolveBaseUrl(request.auth, request.environment) + interpolatePath(request.path, request.pathParams);
-    const headers: Record<string, string> = {
-      accept: "application/json",
-      authorization: `Bearer ${token}`
-    };
-    const init: RequestInit = {
-      method: request.method,
-      headers,
-      redirect: "error",
-      signal: AbortSignal.timeout(request.timeoutMs ?? 15_000)
-    };
-    if (request.payload !== undefined) {
-      headers["content-type"] = "application/json";
-      init.body = JSON.stringify(request.payload);
-    }
+    let token = request.auth === "marketplace"
+      ? await this.#tokenManager.getAccessToken(request.environment)
+      : resolveCredential(request.auth, request.environment, this.#env);
+    const secrets = [token];
+    let response = await this.#send(url, request, token);
 
-    let response: Response;
-    try {
-      response = await this.#fetcher(url, init);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Wolt request failed before receiving a response: ${message.replaceAll(token, "[REDACTED]")}`);
+    if (response.status === 401 && request.auth === "marketplace") {
+      const replacement = await this.#tokenManager.refreshAfterUnauthorized(request.environment, token);
+      if (replacement) {
+        secrets.push(replacement);
+        if (request.method === "GET") {
+          await response.body?.cancel().catch(() => undefined);
+          token = replacement;
+          response = await this.#send(url, request, token);
+        }
+      }
     }
 
     const contentType = response.headers.get("content-type") ?? "";
@@ -122,8 +128,37 @@ export class WoltClient {
 
     if (!response.ok) {
       const detail = typeof data === "string" ? data : JSON.stringify(data);
-      throw new Error(`Wolt API returned HTTP ${response.status}: ${detail.replaceAll(token, "[REDACTED]")}`);
+      throw new Error(`Wolt API returned HTTP ${response.status}: ${this.#sanitize(detail, secrets)}`);
     }
     return { status: response.status, accepted: response.status === 202 || response.status === 204, data };
+  }
+
+  async #send(url: string, request: WoltRequest, token: string): Promise<Response> {
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const init: RequestInit = {
+      method: request.method,
+      headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(request.timeoutMs ?? 15_000)
+    };
+    if (request.payload !== undefined) {
+      headers["content-type"] = "application/json";
+      init.body = JSON.stringify(request.payload);
+    }
+    try {
+      return await this.#fetcher(url, init);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Wolt request failed before receiving a response: ${this.#sanitize(message, [token])}`);
+    }
+  }
+
+  #sanitize(message: string, secrets: string[]): string {
+    let sanitized = message;
+    for (const secret of secrets) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
+    return sanitized;
   }
 }

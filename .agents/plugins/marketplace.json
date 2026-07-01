@@ -1,0 +1,20 @@
+{
+  "name": "wolt-mcp",
+  "interface": {
+    "displayName": "Wolt MCP"
+  },
+  "plugins": [
+    {
+      "name": "wolt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wolt"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

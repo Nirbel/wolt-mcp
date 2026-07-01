@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "wolt": {
+      "command": "node",
+      "args": ["./dist/server.js"],
+      "cwd": ".",
+      "tool_timeout_sec": 150,
+      "env": {
+        "WOLT_MARKETPLACE_CLIENT_ID_TEST": "replace-with-client-id",
+        "WOLT_MARKETPLACE_CLIENT_SECRET_TEST": "replace-with-client-secret",
+        "WOLT_MARKETPLACE_REFRESH_TOKEN_TEST": "replace-with-current-refresh-token"
+      }
+    }
+  }
+}

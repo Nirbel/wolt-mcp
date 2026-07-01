@@ -1,8 +1,29 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-const child = spawn(process.execPath, ["dist/server.js"], {
-  cwd: process.cwd(),
+const [configArgument, hostArgument] = process.argv.slice(2);
+let command = process.execPath;
+let args = ["dist/server.js"];
+let cwd = process.cwd();
+const env = { ...process.env };
+
+if (configArgument) {
+  const configPath = resolve(configArgument);
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  const server = config.mcpServers?.wolt;
+  if (!server || typeof server.command !== "string") throw new Error("Wolt MCP config is missing mcpServers.wolt.command");
+  command = server.command;
+  args = Array.isArray(server.args) ? server.args : [];
+  cwd = server.cwd === "." || server.cwd === undefined ? dirname(configPath) : server.cwd;
+  Object.assign(env, server.env ?? {});
+  if (hostArgument === "--claude-plugin") env.CLAUDE_PLUGIN_ROOT = dirname(configPath);
+}
+
+const child = spawn(command, args, {
+  cwd,
+  env,
   stdio: ["pipe", "pipe", "pipe"]
 });
 const lines = createInterface({ input: child.stdout });

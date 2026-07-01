@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "wolt": {
+      "command": "node",
+      "args": ["./dist/server.js"],
+      "cwd": ".",
+      "tool_timeout_sec": 150,
+      "env": {
+        "WOLT_MARKETPLACE_TOKEN_TEST": "replace-with-one-hour-access-token"
+      }
+    }
+  }
+}

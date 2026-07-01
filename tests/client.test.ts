@@ -1,6 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WoltClient, resolveBaseUrl, resolveCredential } from "../src/client.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
 describe("Wolt client configuration", () => {
   it("selects fixed official hosts for each product and environment", () => {
@@ -18,6 +28,118 @@ describe("Wolt client configuration", () => {
 });
 
 describe("WoltClient.request", () => {
+  it("uses an automatically refreshed Marketplace access token", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wolt-client-oauth-"));
+    temporaryDirectories.push(directory);
+    const tokenStore = join(directory, "oauth-tokens.json");
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("authentication-service")) {
+        return new Response(JSON.stringify({
+          access_token: "refreshed-marketplace-token",
+          refresh_token: "rotated-marketplace-token",
+          expires_in: 3600,
+          token_type: "Bearer"
+        }), { status: 200 });
+      }
+      expect(init?.headers).toEqual(expect.objectContaining({ authorization: "Bearer refreshed-marketplace-token" }));
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const client = new WoltClient({
+      fetcher,
+      env: {
+        WOLT_MARKETPLACE_CLIENT_ID_TEST: "client-id",
+        WOLT_MARKETPLACE_CLIENT_SECRET_TEST: "client-secret",
+        WOLT_MARKETPLACE_REFRESH_TOKEN_TEST: "bootstrap-refresh",
+        WOLT_MARKETPLACE_TOKEN_STORE: tokenStore
+      }
+    });
+
+    await expect(client.request({
+      auth: "marketplace",
+      environment: "test",
+      method: "GET",
+      path: "/venues/{venueId}",
+      pathParams: { venueId: "v1" },
+      confirmProduction: false
+    })).resolves.toMatchObject({ status: 200, data: { ok: true } });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes and retries one GET after an unexpected 401", async () => {
+    const tokenManager = {
+      getAccessToken: vi.fn(async () => "rejected-token"),
+      refreshAfterUnauthorized: vi.fn(async () => "replacement-token")
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "expired" }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+    const client = new WoltClient({ fetcher, env: {}, tokenManager });
+
+    await expect(client.request({
+      auth: "marketplace",
+      environment: "test",
+      method: "GET",
+      path: "/orders/{orderId}",
+      pathParams: { orderId: "o1" },
+      confirmProduction: false
+    })).resolves.toMatchObject({ status: 200, data: { ok: true } });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect((fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer rejected-token");
+    expect((fetcher.mock.calls[1]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer replacement-token");
+    expect(tokenManager.refreshAfterUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay a mutation after a 401 but refreshes for later requests", async () => {
+    const tokenManager = {
+      getAccessToken: vi.fn(async () => "rejected-token"),
+      refreshAfterUnauthorized: vi.fn(async () => "replacement-token")
+    };
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: "expired" }), {
+      status: 401,
+      headers: { "content-type": "application/json" }
+    }));
+    const client = new WoltClient({ fetcher, env: {}, tokenManager });
+
+    await expect(client.request({
+      auth: "marketplace",
+      environment: "test",
+      method: "PATCH",
+      path: "/venues/{venueId}/items",
+      pathParams: { venueId: "v1" },
+      payload: { data: [] },
+      confirmProduction: false
+    })).rejects.toThrow(/HTTP 401.*expired/);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(tokenManager.refreshAfterUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an unauthorized GET at most once", async () => {
+    const tokenManager = {
+      getAccessToken: vi.fn(async () => "rejected-token"),
+      refreshAfterUnauthorized: vi.fn(async () => "replacement-token")
+    };
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: "still unauthorized" }), {
+      status: 401,
+      headers: { "content-type": "application/json" }
+    }));
+    const client = new WoltClient({ fetcher, env: {}, tokenManager });
+
+    await expect(client.request({
+      auth: "marketplace",
+      environment: "test",
+      method: "GET",
+      path: "/test",
+      pathParams: {},
+      confirmProduction: false
+    })).rejects.toThrow(/HTTP 401.*still unauthorized/);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(tokenManager.refreshAfterUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
   it("interpolates path parameters and sends bearer JSON requests", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       status: 200,

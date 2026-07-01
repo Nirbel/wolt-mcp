@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "wolt-mcp",
+  "version": "0.1.0",
+  "description": "Unofficial Wolt API integrations for Claude Code.",
+  "owner": {
+    "name": "Nirbel"
+  },
+  "plugins": [
+    {
+      "name": "wolt",
+      "source": "./plugins/wolt",
+      "description": "Unofficial MCP tools for Wolt menus, venues, orders, timeslots, Drive deliveries, and Order Submitter payloads.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Nirbel"
+      },
+      "category": "productivity",
+      "keywords": ["wolt", "mcp", "menu", "orders", "delivery"]
+    }
+  ]
+}

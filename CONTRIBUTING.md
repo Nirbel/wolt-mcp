@@ -21,6 +21,7 @@ Node.js 20 or newer is required. Keep `package-lock.json` synchronized with `pac
 - Do not add automatic retries for mutations.
 - Keep tool names stable unless the change is intentionally breaking and documented.
 - Rebuild and commit `dist/server.js` after source changes.
+- Run `npm run build` to regenerate `plugins/wolt`; do not edit generated plugin files directly.
 
 ## Wolt contract changes
 
