@@ -1,7 +1,7 @@
 {
   "name": "wolt",
   "displayName": "Wolt MCP",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unofficial MCP integration for Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter APIs.",
   "author": {
     "name": "Nirbel",

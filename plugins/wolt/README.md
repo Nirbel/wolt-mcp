@@ -5,7 +5,7 @@
 An unofficial, community-built, stdio-based Model Context Protocol server and Codex plugin for Wolt marketplace and Wolt Drive integrations. It exposes 38 operations from Wolt's Menu, Venue, Order, Timeslot, and Drive APIs, plus three focused helpers for menu-item lookup, stock inspection, and Order Submitter validation.
 
 > [!IMPORTANT]
-> This is an unofficial integration and is not affiliated with or endorsed by Wolt. You need credentials and API access issued by Wolt. The project is currently a private, unlicensed `0.1.0` pre-release; choose and add a license before making the repository public.
+> This is an unofficial integration and is not affiliated with or endorsed by Wolt. You need credentials and API access issued by Wolt. The project is currently a private, unlicensed `0.2.0` pre-release; choose and add a license before making the repository public.
 
 ## Highlights
 
@@ -24,7 +24,7 @@ An unofficial, community-built, stdio-based Model Context Protocol server and Co
 
 | Component | Support |
 | --- | --- |
-| Project version | `0.1.0` pre-release |
+| Project version | `0.2.0` pre-release |
 | Node.js | 20 or newer |
 | MCP transport | stdio |
 | MCP protocol smoke test | `2025-06-18` |
@@ -178,6 +178,8 @@ The state contains access and refresh tokens but never the client secret. Writes
 Do not share the same refresh token or token-store file across multiple machines. Wolt refresh tokens are single-use, so independent machines can invalidate each other's credentials. For multi-machine or server deployment, use an external credential broker or transactional shared secret store instead of local-file mode.
 
 If a client ID changes, its old stored profile is ignored and a fresh `WOLT_MARKETPLACE_REFRESH_TOKEN_*` is required. Partial OAuth configuration is rejected rather than silently falling back to a static token.
+
+If the token store cannot be written (for example a full or read-only disk), the freshly refreshed token is kept in memory and used for the rest of the process's lifetime, and a credential-free warning is logged; fix the store path or permissions to restore persistence. In the rare case the process exits after Wolt rotates the token but before the replacement is written, re-set `WOLT_MARKETPLACE_REFRESH_TOKEN_*` (re-run Wolt integration if that bootstrap token has also expired) and restart.
 
 ### Simple alternative: static access token
 
@@ -387,6 +389,8 @@ Pass the exact, unmodified HTTP body and optional hexadecimal signature:
 
 When `signature` is provided, the helper reads the matching webhook secret from the environment and uses a timing-safe comparison.
 
+The result is `{ valid, signature_valid, order, errors, warnings }`. The signature is verified before the body is parsed, so a bad signature returns `signature_valid: false` with `order: null`—**treat that as a rejected webhook.** `signature_valid` is `null` when no signature is supplied. `warnings` lists documented enum fields whose values are outside the known set; Wolt may introduce new values without a version change, so these are accepted for forward-compatibility and do not make `valid` false. A missing webhook secret raises an error.
+
 ## Stock quantity semantics
 
 Wolt's documented v2 menu response includes `inventory_mode` but does not guarantee that remaining inventory is returned. `menu_get_qty_on_stock` therefore:
@@ -426,7 +430,7 @@ Tool errors include a sanitized message for:
 - Wolt HTTP errors including rate limiting and conflicts;
 - unsafe asynchronous menu URLs;
 - malformed, failed, unknown, or timed-out menu generation states;
-- malformed Order Submitter JSON or invalid HMAC signatures.
+- malformed Order Submitter JSON or a missing webhook secret (a bad signature instead returns `signature_valid: false`).
 
 The server does not log credentials. As with any integration, avoid copying customer/order payloads into public bug reports.
 

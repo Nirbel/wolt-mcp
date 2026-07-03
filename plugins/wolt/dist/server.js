@@ -8947,13 +8947,13 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     }
     return propValues;
   });
-  const isObject3 = isObject;
+  const isObject4 = isObject;
   const catchall = def.catchall;
   let value;
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input = payload.value;
-    if (!isObject3(input)) {
+    if (!isObject4(input)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -9080,7 +9080,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     return (payload, ctx) => fn(shape, payload, ctx);
   };
   let fastpass;
-  const isObject3 = isObject;
+  const isObject4 = isObject;
   const jit = !globalConfig.jitless;
   const allowsEval2 = allowsEval;
   const fastEnabled = jit && allowsEval2.value;
@@ -9089,7 +9089,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input = payload.value;
-    if (!isObject3(input)) {
+    if (!isObject4(input)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -15449,6 +15449,66 @@ var Server = class extends Protocol {
   }
 };
 
+// package.json
+var package_default = {
+  name: "wolt-mcp",
+  version: "0.2.0",
+  description: "Unofficial Wolt API MCP server and Codex skill with explicit production safeguards.",
+  private: true,
+  license: "UNLICENSED",
+  type: "module",
+  bin: {
+    "wolt-mcp": "./dist/server.js"
+  },
+  files: [
+    "dist/server.js",
+    "plugins/wolt",
+    ".agents/plugins",
+    ".claude-plugin",
+    "examples",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  repository: {
+    type: "git",
+    url: "git+https://github.com/Nirbel/wolt-mcp.git"
+  },
+  homepage: "https://github.com/Nirbel/wolt-mcp#readme",
+  bugs: {
+    url: "https://github.com/Nirbel/wolt-mcp/issues"
+  },
+  keywords: [
+    "wolt",
+    "mcp",
+    "model-context-protocol",
+    "codex",
+    "wolt-drive"
+  ],
+  engines: {
+    node: ">=20"
+  },
+  scripts: {
+    build: "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.js --banner:js='#!/usr/bin/env node' && node scripts/normalize-bundle.mjs && npm run package:plugins",
+    "package:plugins": "node scripts/package-plugins.mjs",
+    smoke: "node scripts/smoke.mjs",
+    test: "vitest run",
+    "test:watch": "vitest",
+    typecheck: "tsc --noEmit",
+    verify: "npm run build && npm run test && npm run smoke"
+  },
+  dependencies: {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    ajv: "8.20.0"
+  },
+  devDependencies: {
+    "@types/node": "24.10.1",
+    esbuild: "0.28.1",
+    typescript: "6.0.3",
+    vitest: "4.1.9"
+  }
+};
+
 // src/marketplace-token-manager.ts
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -15551,6 +15611,52 @@ function validateTokenResponse(value) {
     expiresIn: record2.expires_in
   };
 }
+async function fileReadStore(statePath) {
+  try {
+    return parseStore(await readFile(statePath, "utf8"), statePath);
+  } catch (error2) {
+    if (asErrorCode(error2) === "ENOENT") return { version: STORE_VERSION, profiles: {} };
+    throw error2;
+  }
+}
+async function syncDirectory(directory) {
+  try {
+    const handle = await open(directory, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch {
+  }
+}
+async function fileWriteStore(statePath, store) {
+  const directory = dirname(statePath);
+  await mkdir(directory, { recursive: true, mode: 448 });
+  await chmod(directory, 448).catch(() => void 0);
+  const temporaryPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temporaryPath, "wx", 384);
+  try {
+    try {
+      await handle.writeFile(`${JSON.stringify(store, null, 2)}
+`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch (error2) {
+    await unlink(temporaryPath).catch(() => void 0);
+    throw error2;
+  }
+  try {
+    await rename(temporaryPath, statePath);
+  } catch (error2) {
+    await unlink(temporaryPath).catch(() => void 0);
+    throw error2;
+  }
+  await chmod(statePath, 384).catch(() => void 0);
+  await syncDirectory(directory);
+}
 var MarketplaceTokenManager = class {
   #env;
   #fetcher;
@@ -15561,6 +15667,11 @@ var MarketplaceTokenManager = class {
   #lockTimeoutMs;
   #staleLockMs;
   #refreshes = /* @__PURE__ */ new Map();
+  #readStoreImpl;
+  #writeStoreImpl;
+  #warn;
+  #memoryProfiles = /* @__PURE__ */ new Map();
+  #warnedKeys = /* @__PURE__ */ new Set();
   constructor(options = {}) {
     this.#env = options.env ?? process.env;
     this.#fetcher = options.fetcher ?? fetch;
@@ -15570,6 +15681,9 @@ var MarketplaceTokenManager = class {
     this.#lockRetryMs = options.lockRetryMs ?? DEFAULT_LOCK_RETRY_MS;
     this.#lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
     this.#staleLockMs = options.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+    this.#readStoreImpl = options.readStore ?? (() => fileReadStore(this.#statePath));
+    this.#writeStoreImpl = options.writeStore ?? ((store) => fileWriteStore(this.#statePath, store));
+    this.#warn = options.warn ?? ((message) => console.error(message));
   }
   async getAccessToken(environment2) {
     const config2 = this.#oauthConfig(environment2);
@@ -15640,9 +15754,22 @@ var MarketplaceTokenManager = class {
         refresh_token: token.refreshToken,
         expires_at: this.#now() + token.expiresIn * 1e3
       };
-      await this.#writeProfile(environment2, nextProfile);
+      try {
+        await this.#writeProfile(environment2, nextProfile);
+      } catch (error2) {
+        this.#warnOnce(
+          `write-failed:${environment2}`,
+          `Wolt OAuth token store write failed for ${environment2}; using the refreshed token in memory for this process only. Fix the store path/permissions or re-set ${OAUTH_NAMES[environment2].refreshToken} to re-bootstrap. ${this.#sanitize(error2, [nextProfile.access_token, nextProfile.refresh_token, config2.clientSecret, config2.bootstrapRefreshToken])}`
+        );
+      }
+      this.#memoryProfiles.set(environment2, nextProfile);
       return nextProfile.access_token;
     });
+  }
+  #warnOnce(key, message) {
+    if (this.#warnedKeys.has(key)) return;
+    this.#warnedKeys.add(key);
+    this.#warn(message);
   }
   async #requestRefresh(environment2, config2, refreshToken, previousAccessToken) {
     const encodedAuthorization = Buffer.from(`${config2.clientId}:${config2.clientSecret}`).toString("base64");
@@ -15702,85 +15829,71 @@ var MarketplaceTokenManager = class {
     return message.slice(0, 2e3);
   }
   async #readStore() {
-    try {
-      return parseStore(await readFile(this.#statePath, "utf8"), this.#statePath);
-    } catch (error2) {
-      if (asErrorCode(error2) === "ENOENT") return { version: STORE_VERSION, profiles: {} };
-      throw error2;
-    }
+    return this.#readStoreImpl();
   }
   async #readProfile(environment2, clientId) {
-    const profile = (await this.#readStore()).profiles[environment2];
-    if (!profile || profile.client_id_fingerprint !== clientIdFingerprint(clientId)) return void 0;
-    return profile;
+    const fingerprint = clientIdFingerprint(clientId);
+    const fileProfile = (await this.#readStore()).profiles[environment2];
+    const memoryProfile = this.#memoryProfiles.get(environment2);
+    const candidates = [fileProfile, memoryProfile].filter(
+      (profile) => profile !== void 0 && profile.client_id_fingerprint === fingerprint
+    );
+    if (candidates.length === 0) return void 0;
+    return candidates.reduce((latest, profile) => profile.expires_at > latest.expires_at ? profile : latest);
   }
   async #writeProfile(environment2, profile) {
     const store = await this.#readStore();
     store.profiles[environment2] = profile;
-    const directory = dirname(this.#statePath);
-    await mkdir(directory, { recursive: true, mode: 448 });
-    await chmod(directory, 448).catch(() => void 0);
-    const temporaryPath = `${this.#statePath}.${process.pid}.${randomUUID()}.tmp`;
-    const handle = await open(temporaryPath, "wx", 384);
-    try {
-      try {
-        await handle.writeFile(`${JSON.stringify(store, null, 2)}
-`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-    } catch (error2) {
-      await unlink(temporaryPath).catch(() => void 0);
-      throw error2;
-    }
-    try {
-      await rename(temporaryPath, this.#statePath);
-      await chmod(this.#statePath, 384).catch(() => void 0);
-    } catch (error2) {
-      await unlink(temporaryPath).catch(() => void 0);
-      throw error2;
-    }
+    await this.#writeStoreImpl(store);
   }
   async #withFileLock(action) {
     const directory = dirname(this.#statePath);
     await mkdir(directory, { recursive: true, mode: 448 });
     await chmod(directory, 448).catch(() => void 0);
     const lockPath = `${this.#statePath}.lock`;
+    const nonce = randomUUID();
     const deadline = Date.now() + this.#lockTimeoutMs;
-    let handle;
-    while (!handle) {
-      try {
-        handle = await open(lockPath, "wx", 384);
-      } catch (error2) {
-        if (asErrorCode(error2) !== "EEXIST") throw error2;
+    const ownsLock = async () => (await readFile(lockPath, "utf8").catch(() => "")).includes(nonce);
+    while (true) {
+      let handle;
+      while (!handle) {
         try {
-          const lockStat = await stat(lockPath);
-          if (Date.now() - lockStat.mtimeMs > this.#staleLockMs) {
-            await unlink(lockPath);
-            continue;
+          handle = await open(lockPath, "wx", 384);
+        } catch (error2) {
+          if (asErrorCode(error2) !== "EEXIST") throw error2;
+          try {
+            const lockStat = await stat(lockPath);
+            if (Date.now() - lockStat.mtimeMs > this.#staleLockMs) {
+              await unlink(lockPath).catch(() => void 0);
+              continue;
+            }
+          } catch (statError) {
+            if (asErrorCode(statError) === "ENOENT") continue;
+            throw statError;
           }
-        } catch (statError) {
-          if (asErrorCode(statError) === "ENOENT") continue;
-          throw statError;
+          if (Date.now() >= deadline) throw new Error(`Timed out waiting for Wolt OAuth token-store lock at ${lockPath}`);
+          await delay(this.#lockRetryMs);
         }
+      }
+      try {
+        await handle.writeFile(JSON.stringify({ pid: process.pid, nonce, created_at: Date.now() }), "utf8");
+        await handle.sync();
+      } catch (error2) {
+        await handle.close().catch(() => void 0);
+        if (await ownsLock()) await unlink(lockPath).catch(() => void 0);
+        throw error2;
+      }
+      await handle.close().catch(() => void 0);
+      if (!await ownsLock()) {
         if (Date.now() >= deadline) throw new Error(`Timed out waiting for Wolt OAuth token-store lock at ${lockPath}`);
         await delay(this.#lockRetryMs);
+        continue;
       }
-    }
-    try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, created_at: Date.now() }), "utf8");
-      await handle.sync();
-    } catch (error2) {
-      await handle.close().catch(() => void 0);
-      await unlink(lockPath).catch(() => void 0);
-      throw error2;
-    }
-    try {
-      return await action();
-    } finally {
-      await handle.close().catch(() => void 0);
-      await unlink(lockPath).catch(() => void 0);
+      try {
+        return await action();
+      } finally {
+        if (await ownsLock()) await unlink(lockPath).catch(() => void 0);
+      }
     }
   }
 };
@@ -16001,7 +16114,8 @@ var MenuService = class {
       method: "GET",
       path: "/v2/venues/{venueId}/menu",
       pathParams: { venueId: options.venueId },
-      confirmProduction: false
+      confirmProduction: false,
+      timeoutMs: Math.min(timeoutMs, 15e3)
     });
     if (!isObject2(requested.data)) throw new Error("Wolt returned a malformed asynchronous menu response");
     const resourceUrl = assertAllowedResourceUrl(requested.data.resource_url);
@@ -16009,12 +16123,17 @@ var MenuService = class {
     while (true) {
       const requestRemainingMs = timeoutMs - (this.#now() - startedAt);
       if (requestRemainingMs <= 0) break;
-      const response = await this.#fetcher(resourceUrl, {
-        method: "GET",
-        headers: { accept: "application/json" },
-        redirect: "error",
-        signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15e3))
-      });
+      let response;
+      try {
+        response = await this.#fetcher(resourceUrl, {
+          method: "GET",
+          headers: { accept: "application/json" },
+          redirect: "error",
+          signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15e3))
+        });
+      } catch {
+        throw new Error("Wolt menu resource request failed");
+      }
       if (!response.ok) throw new Error(`Wolt menu resource returned HTTP ${response.status}`);
       let result;
       try {
@@ -16044,6 +16163,9 @@ var MenuService = class {
 // src/order-submitter.ts
 var import_ajv2 = __toESM(require_ajv(), 1);
 import { createHmac, timingSafeEqual } from "node:crypto";
+function isObject3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 var ORDER_SUBMITTER_SCHEMA = {
   $id: "wolt-order-submitter",
   type: "object",
@@ -16071,9 +16193,9 @@ var ORDER_SUBMITTER_SCHEMA = {
       properties: {
         status: {
           type: "string",
-          enum: ["estimated", "assigned", "courier_at_venue", "picked_up", "courier_at_delivery_location", "delivered"]
+          description: "Known values: estimated, assigned, courier_at_venue, picked_up, courier_at_delivery_location, delivered. Unknown values are accepted for forward-compatibility and reported in warnings."
         },
-        type: { type: "string", enum: ["takeaway", "homedelivery", "eatin"] },
+        type: { type: "string", description: "Known values: takeaway, homedelivery, eatin. Unknown values are accepted and reported in warnings." },
         time: { type: ["string", "null"] },
         self_delivery: { type: "boolean" }
       }
@@ -16151,7 +16273,7 @@ var ORDER_SUBMITTER_SCHEMA = {
           },
           sku: { type: ["string", "null"] },
           gtin: { type: ["string", "null"] },
-          item_type: { type: "string", enum: ["order-item", "order-retail-item"] }
+          item_type: { type: "string", description: "Known values: order-item, order-retail-item. Unknown values are accepted and reported in warnings." }
         }
       }
     },
@@ -16161,9 +16283,9 @@ var ORDER_SUBMITTER_SCHEMA = {
     order_number: { type: "string" },
     order_status: {
       type: "string",
-      enum: ["received", "fetched", "acknowledged", "production", "ready", "delivered", "rejected", "other"]
+      description: "Known values: received, fetched, acknowledged, production, ready, delivered, rejected, other. Unknown values are accepted and reported in warnings."
     },
-    type: { type: "string", enum: ["preorder", "instant"] },
+    type: { type: "string", description: "Known values: preorder, instant. Unknown values are accepted and reported in warnings." },
     consumer_comment: { type: ["string", "null"] },
     consumer_name: { type: "string" },
     consumer_phone_number: { type: ["string", "null"] },
@@ -16174,10 +16296,18 @@ var ORDER_SUBMITTER_SCHEMA = {
       additionalProperties: true,
       properties: {
         preorder_time: { type: "string" },
-        pre_order_status: { type: "string", enum: ["confirmed", "waiting"] }
+        pre_order_status: { type: "string", description: "Known values: confirmed, waiting. Unknown values are accepted and reported in warnings." }
       }
     }
   }
+};
+var KNOWN_ENUM_VALUES = {
+  order_status: ["received", "fetched", "acknowledged", "production", "ready", "delivered", "rejected", "other"],
+  type: ["preorder", "instant"],
+  "delivery.status": ["estimated", "assigned", "courier_at_venue", "picked_up", "courier_at_delivery_location", "delivered"],
+  "delivery.type": ["takeaway", "homedelivery", "eatin"],
+  item_type: ["order-item", "order-retail-item"],
+  "pre_order.pre_order_status": ["confirmed", "waiting"]
 };
 var ajv = new import_ajv2.Ajv({ allErrors: true, strict: false });
 var validate = ajv.compile(ORDER_SUBMITTER_SCHEMA);
@@ -16190,7 +16320,50 @@ function verifySignature(rawBody, signature, secret) {
   const actual = Buffer.from(signature, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
+function unrecognizedValue(field, value, known) {
+  if (typeof value !== "string" || known.includes(value)) return null;
+  return `Unrecognized ${field} "${value}" (known: ${known.join(", ")}). Accepted for forward-compatibility.`;
+}
+function collectEnumWarnings(order) {
+  if (!isObject3(order)) return [];
+  const warnings = [];
+  const check = (field, value, known) => {
+    const warning = unrecognizedValue(field, value, known);
+    if (warning) warnings.push(warning);
+  };
+  check("order_status", order.order_status, KNOWN_ENUM_VALUES.order_status);
+  check("type", order.type, KNOWN_ENUM_VALUES.type);
+  if (isObject3(order.delivery)) {
+    check("delivery.status", order.delivery.status, KNOWN_ENUM_VALUES["delivery.status"]);
+    check("delivery.type", order.delivery.type, KNOWN_ENUM_VALUES["delivery.type"]);
+  }
+  if (Array.isArray(order.items)) {
+    order.items.forEach((item, index) => {
+      if (isObject3(item)) check(`items[${index}].item_type`, item.item_type, KNOWN_ENUM_VALUES.item_type);
+    });
+  }
+  if (isObject3(order.pre_order)) {
+    check("pre_order.pre_order_status", order.pre_order.pre_order_status, KNOWN_ENUM_VALUES["pre_order.pre_order_status"]);
+  }
+  return warnings;
+}
 function validateOrderSubmitter(options) {
+  let signatureValid = null;
+  if (options.signature !== void 0) {
+    const name = options.environment === "test" ? "WOLT_WEBHOOK_SECRET_TEST" : "WOLT_WEBHOOK_SECRET_PRODUCTION";
+    const secret = (options.env ?? process.env)[name]?.trim();
+    if (!secret) throw new Error(`Missing Wolt webhook secret: set ${name}`);
+    signatureValid = verifySignature(options.rawBody, options.signature, secret);
+    if (!signatureValid) {
+      return {
+        valid: false,
+        signature_valid: false,
+        order: null,
+        errors: ["WOLT-SIGNATURE verification failed; body not validated"],
+        warnings: []
+      };
+    }
+  }
   let order;
   try {
     order = JSON.parse(options.rawBody);
@@ -16198,15 +16371,13 @@ function validateOrderSubmitter(options) {
     throw new Error("Order Submitter body is not valid JSON");
   }
   const valid = validate(order);
-  let signatureValid = null;
-  if (options.signature !== void 0) {
-    const name = options.environment === "test" ? "WOLT_WEBHOOK_SECRET_TEST" : "WOLT_WEBHOOK_SECRET_PRODUCTION";
-    const secret = (options.env ?? process.env)[name]?.trim();
-    if (!secret) throw new Error(`Missing Wolt webhook secret: set ${name}`);
-    signatureValid = verifySignature(options.rawBody, options.signature, secret);
-    if (!signatureValid) throw new Error("Wolt webhook signature verification failed");
-  }
-  return { valid, signature_valid: signatureValid, order, errors: valid ? [] : formatErrors(validate.errors) };
+  return {
+    valid,
+    signature_valid: signatureValid,
+    order,
+    errors: valid ? [] : formatErrors(validate.errors),
+    warnings: collectEnumWarnings(order)
+  };
 }
 
 // src/tools.ts
@@ -33758,6 +33929,12 @@ var definitions = [
   { name: "drive_get_delivery_fee", domain: "drive", specId: "create-delivery-fee", method: "POST", path: "/merchants/{merchantId}/delivery-fee", auth: "drive" },
   { name: "drive_create_delivery_order", domain: "drive", specId: "create-delivery-order", method: "POST", path: "/merchants/{merchantId}/delivery-order", auth: "drive" }
 ];
+function assertSupportedParameters(name, parameters) {
+  const unsupported = parameters.find((group) => group.type === "query" || group.type === "header");
+  if (unsupported) {
+    throw new Error(`Wolt operation ${name} uses unsupported ${unsupported.type} parameters; add query/header handling before exposing it`);
+  }
+}
 function getSnapshotOperation(definition) {
   const source = wolt_official_default.sources[definition.domain];
   const operation = source.operations[definition.specId];
@@ -33765,6 +33942,7 @@ function getSnapshotOperation(definition) {
   if (operation.method.toUpperCase() !== definition.method || operation.path !== definition.path) {
     throw new Error(`Wolt specification mismatch for ${definition.name}`);
   }
+  assertSupportedParameters(definition.name, operation.parameters ?? []);
   return operation;
 }
 var operationCatalog = definitions.map((definition) => {
@@ -34002,7 +34180,7 @@ function createWoltServer(options = {}) {
   const menuService = options.menuService ?? new MenuService({ client });
   const runtime = createToolRuntime({ client, menuService });
   const server2 = new Server(
-    { name: "wolt", version: "0.1.0" },
+    { name: "wolt", version: package_default.version },
     {
       capabilities: { tools: {}, resources: {} },
       instructions: "Choose test or production explicitly. Read operations are safe. Production mutations require confirm_production=true. Never request credentials in tool arguments."

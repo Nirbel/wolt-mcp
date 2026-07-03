@@ -4,7 +4,7 @@ export type WoltEnvironment = "test" | "production";
 export type AuthKind = "marketplace" | "drive";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
 
-type ParameterGroup = {
+export type ParameterGroup = {
   type: "path" | "query" | "body" | "header";
   label: string;
   schema: Record<string, unknown>;
@@ -70,6 +70,13 @@ const definitions: OperationDefinition[] = [
   { name: "drive_create_delivery_order", domain: "drive", specId: "create-delivery-order", method: "POST", path: "/merchants/{merchantId}/delivery-order", auth: "drive" }
 ];
 
+export function assertSupportedParameters(name: string, parameters: ParameterGroup[]): void {
+  const unsupported = parameters.find((group) => group.type === "query" || group.type === "header");
+  if (unsupported) {
+    throw new Error(`Wolt operation ${name} uses unsupported ${unsupported.type} parameters; add query/header handling before exposing it`);
+  }
+}
+
 function getSnapshotOperation(definition: OperationDefinition): SnapshotOperation {
   const source = snapshot.sources[definition.domain as keyof typeof snapshot.sources];
   const operation = source.operations[definition.specId as keyof typeof source.operations] as SnapshotOperation | undefined;
@@ -77,6 +84,7 @@ function getSnapshotOperation(definition: OperationDefinition): SnapshotOperatio
   if (operation.method.toUpperCase() !== definition.method || operation.path !== definition.path) {
     throw new Error(`Wolt specification mismatch for ${definition.name}`);
   }
+  assertSupportedParameters(definition.name, operation.parameters ?? []);
   return operation;
 }
 

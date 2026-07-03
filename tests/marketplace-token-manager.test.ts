@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -336,5 +336,59 @@ describe("MarketplaceTokenManager refresh", () => {
       secondProcess.refreshAfterUnauthorized("test", "rejected-access-token")
     ])).resolves.toEqual(["shared-recovered-token", "shared-recovered-token"]);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a refreshed token in memory when the store write fails", async () => {
+    const now = 1_800_000_000_000;
+    const warnings: string[] = [];
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      access_token: "memory-access-token",
+      refresh_token: "memory-refresh-token",
+      expires_in: 3600,
+      token_type: "Bearer"
+    }), { status: 200 }));
+    const manager = new MarketplaceTokenManager({
+      env: oauthEnv(),
+      fetcher,
+      statePath: await temporaryStore(),
+      now: () => now,
+      writeStore: async () => { throw new Error("simulated disk failure"); },
+      warn: (message) => warnings.push(message)
+    });
+
+    // First call refreshes; the write fails but the token is kept in memory and returned.
+    await expect(manager.getAccessToken("test")).resolves.toBe("memory-access-token");
+    // Second call reuses the in-memory token without a second refresh.
+    await expect(manager.getAccessToken("test")).resolves.toBe("memory-access-token");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(warnings.some((message) => /token store write failed/i.test(message))).toBe(true);
+    expect(warnings.join(" ")).not.toContain("memory-refresh-token");
+  });
+
+  it("reclaims a stale lock left by a crashed process and refreshes once", async () => {
+    const statePath = await temporaryStore();
+    const now = 1_800_000_000_000;
+    const lockPath = `${statePath}.lock`;
+    await writeFile(lockPath, JSON.stringify({ pid: 999_999, nonce: "stale", created_at: 0 }));
+    const staleTime = new Date(Date.now() - 60_000);
+    await utimes(lockPath, staleTime, staleTime);
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      access_token: "post-stale-access-token",
+      refresh_token: "post-stale-refresh-token",
+      expires_in: 3600,
+      token_type: "Bearer"
+    }), { status: 200 }));
+    const manager = new MarketplaceTokenManager({
+      env: oauthEnv(),
+      fetcher,
+      statePath,
+      now: () => now,
+      staleLockMs: 30_000,
+      lockRetryMs: 1
+    });
+
+    await expect(manager.getAccessToken("test")).resolves.toBe("post-stale-access-token");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

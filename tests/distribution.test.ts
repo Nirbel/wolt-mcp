@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -38,7 +39,7 @@ describe("cross-client distribution", () => {
     expect(marketplace).toMatchObject({
       name: "wolt-mcp",
       owner: { name: "Nirbel" },
-      plugins: [{ name: "wolt", source: "./plugins/wolt", version: "0.1.0" }]
+      plugins: [{ name: "wolt", source: "./plugins/wolt", version: "0.2.0" }]
     });
   });
 
@@ -105,11 +106,34 @@ describe("cross-client distribution", () => {
     const sharedMcp = await json("plugins/wolt/.mcp.json");
 
     expect(codexManifest).toMatchObject({ name: "wolt", mcpServers: "./.mcp.json" });
-    expect(claudeManifest).toMatchObject({ name: "wolt", version: "0.1.0" });
-    expect(sharedMcp.mcpServers.wolt).toMatchObject({ command: "node", cwd: "." });
+    expect(claudeManifest).toMatchObject({ name: "wolt", version: "0.2.0" });
+    expect(sharedMcp.mcpServers.wolt).toMatchObject({ command: "node", cwd: ".", tool_timeout_sec: 150 });
     expect(sharedMcp.mcpServers.wolt.args).toEqual(expect.arrayContaining(["--input-type=module", "--eval"]));
     expect(sharedMcp.mcpServers.wolt.args.join(" ")).toContain("CLAUDE_PLUGIN_ROOT");
+    expect(sharedMcp.mcpServers.wolt.args.join(" ")).toContain("PLUGIN_ROOT");
     expect(sharedMcp.mcpServers.wolt.args.join(" ")).toContain("dist/server.js");
+  });
+
+  it("fails with a clear error when the plugin root cannot be resolved", async () => {
+    const sharedMcp = await json("plugins/wolt/.mcp.json");
+    const launcher = sharedMcp.mcpServers.wolt.args[2];
+    const emptyDir = await mkdtemp(join(tmpdir(), "wolt-noroot-"));
+    try {
+      let stderr = "";
+      try {
+        await execute(process.execPath, ["--input-type=module", "--eval", launcher], {
+          cwd: emptyDir,
+          env: { ...process.env, CLAUDE_PLUGIN_ROOT: "", PLUGIN_ROOT: "" },
+          timeout: 10_000
+        });
+      } catch (error) {
+        stderr = String((error as { stderr?: string }).stderr ?? error);
+      }
+      expect(stderr).toMatch(/cannot find/i);
+      expect(stderr).toContain("dist/server.js");
+    } finally {
+      await rm(emptyDir, { recursive: true, force: true });
+    }
   });
 
   it("packages the exact standalone server and skill inside the plugin", async () => {

@@ -167,4 +167,29 @@ describe("MenuService.getMenu", () => {
     });
     await expect(timeoutService.getMenu({ environment: "test", venueId: "v1", timeoutMs: 50 })).rejects.toThrow(/timed out/i);
   });
+
+  it("does not leak the presigned resource URL when the poll request fails", async () => {
+    const client = {
+      request: vi.fn(async () => ({
+        status: 202,
+        accepted: true,
+        data: { resource_url: "https://bucket.s3.eu-west-1.amazonaws.com/result?X-Amz-Signature=deadbeefsecret" }
+      }))
+    } as unknown as WoltClient;
+    const service = new MenuService({
+      client,
+      fetcher: vi.fn(async () => {
+        throw new Error("connect failed to https://bucket.s3.eu-west-1.amazonaws.com/result?X-Amz-Signature=deadbeefsecret");
+      })
+    });
+    let message = "";
+    try {
+      await service.getMenu({ environment: "test", venueId: "v1" });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain("Wolt menu resource request failed");
+    expect(message).not.toContain("X-Amz-Signature");
+    expect(message).not.toContain("deadbeefsecret");
+  });
 });

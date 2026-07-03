@@ -41,6 +41,12 @@ Failed refreshes preserve existing state and produce sanitized errors without to
 
 Marketplace requests obtain credentials from the manager. An unexpected 401 on a GET forces one refresh and retries once. A 401 on a mutation may refresh the credential for later calls but never replays the mutation. Existing production and full-menu replacement confirmations remain unchanged.
 
+## Persistence resilience and recovery
+
+Persistence goes through a small injectable store seam (default: the local file), and the successful-refresh path is decoupled from writing it. If the store write fails after Wolt has issued a rotated pair, the manager keeps the new access and refresh tokens in memory, serves them for the rest of the process lifetime (including in-process re-refreshes), and logs one credential-free warning. Successful writes fsync the parent directory so a completed rotation survives power loss. The file lock records a per-holder nonce and only removes a lock it still owns, so a stale-lock reclaim cannot let two processes enter the critical section simultaneously.
+
+The one unavoidable window is a hard crash (power loss or `SIGKILL`) after Wolt returns a rotated pair but before any write begins: the new refresh token is lost while the old one is already invalidated server-side. Recovery is manual—re-set `WOLT_MARKETPLACE_REFRESH_TOKEN_<ENVIRONMENT>` (re-run Wolt integration if that bootstrap token has also expired) and restart. A remote or transactional credential broker is the only way to remove this window entirely.
+
 ## Deployment boundary
 
 One computer may share this file safely across multiple Codex and Claude Code MCP processes. One refresh token must not be shared across machines because Wolt refresh tokens are single-use. Multi-machine deployments need an external credential broker or transactional shared secret store.

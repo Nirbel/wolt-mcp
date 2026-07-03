@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { operationCatalog } from "../src/catalog.js";
+import { assertSupportedParameters, operationCatalog } from "../src/catalog.js";
 
 const expected = [
   ["menu_replace", "POST", "/v1/restaurants/{venueId}/menu", "marketplace"],
@@ -54,5 +54,14 @@ describe("operation catalog", () => {
     for (const operation of operationCatalog) {
       expect(operation.mutation).toBe(operation.method !== "GET");
     }
+  });
+
+  it("fails loudly if a spec operation declares unsupported query/header parameters", () => {
+    expect(() => assertSupportedParameters("demo", [{ type: "query", label: "q", schema: {} }])).toThrow(/unsupported query/);
+    expect(() => assertSupportedParameters("demo", [{ type: "header", label: "h", schema: {} }])).toThrow(/unsupported header/);
+    expect(() => assertSupportedParameters("demo", [
+      { type: "path", label: "p", schema: {} },
+      { type: "body", label: "b", schema: {} }
+    ])).not.toThrow();
   });
 });

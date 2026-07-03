@@ -1,6 +1,6 @@
 {
   "name": "wolt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unofficial MCP integration for the documented Wolt marketplace and Drive API catalog.",
   "author": {
     "name": "nirbelachnes"

@@ -33,3 +33,4 @@ Use the `wolt` MCP tools. Never ask the user to paste a JWT, Drive key, or webho
 - Treat refunds, item replacement, order rejection, and Drive delivery creation as consequential operations.
 - Preserve money values in the denomination required by the selected endpoint; item patch prices are integer minor units.
 - Do not retry mutations automatically after an ambiguous network failure.
+- Reject an Order Submitter webhook when `order_submitter_validate` returns `signature_valid: false`; surface `warnings` (unknown Wolt enum values) without blocking on them.
