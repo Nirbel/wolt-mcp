@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-The project is pre-release. Security fixes are applied to the latest commit on `main` and the latest tagged `0.1.x` release, if one exists.
+The project is pre-release. Security fixes are applied to the latest commit on `main` and the latest tagged `0.2.x` release, if one exists.
 
 ## Reporting a vulnerability
 
@@ -22,6 +22,7 @@ Do not include real Wolt credentials, customer data, order payloads, or producti
 - The local token store is plaintext JSON protected with best-effort owner-only permissions (`0700` directory and `0600` file). Anyone who can read it can use the stored Marketplace tokens.
 - Do not place the token store in a synced folder, repository, shared filesystem, or network mount. Do not share one Wolt refresh token across machines.
 - Multi-machine deployments need an external credential broker or transactional shared secret store; local-file locking only coordinates processes on one computer.
+- If the token store cannot be written, a refreshed token is kept in memory for the current process only and a credential-free warning is logged. A crash after Wolt rotates the token but before the replacement is persisted requires re-setting `WOLT_MARKETPLACE_REFRESH_TOKEN_*` and restarting; see `docs/design/automatic-oauth-refresh.md`.
 - Production mutation confirmation reduces accidental use; it is not an authorization boundary.
 - The MCP host and local user account remain responsible for tool approvals and filesystem/process security.
 - Wolt remains responsible for authenticating credentials and authorizing venue, merchant, and order access.

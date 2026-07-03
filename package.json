@@ -1,6 +1,6 @@
 {
-  "name": "wolt-mcp-plugin",
-  "version": "0.1.0",
+  "name": "wolt-mcp",
+  "version": "0.2.0",
   "description": "Unofficial Wolt API MCP server and Codex skill with explicit production safeguards.",
   "private": true,
   "license": "UNLICENSED",

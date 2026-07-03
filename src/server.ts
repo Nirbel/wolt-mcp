@@ -8,6 +8,8 @@ import {
   type Tool
 } from "@modelcontextprotocol/sdk/types.js";
 
+import pkg from "../package.json" with { type: "json" };
+
 import { WoltClient } from "./client.js";
 import { MenuService } from "./menu.js";
 import { ORDER_SUBMITTER_SCHEMA } from "./order-submitter.js";
@@ -28,7 +30,7 @@ export function createWoltServer(options: { client?: WoltClient; menuService?: M
   const menuService = options.menuService ?? new MenuService({ client });
   const runtime = createToolRuntime({ client, menuService });
   const server = new Server(
-    { name: "wolt", version: "0.1.0" },
+    { name: "wolt", version: pkg.version },
     {
       capabilities: { tools: {}, resources: {} },
       instructions: "Choose test or production explicitly. Read operations are safe. Production mutations require confirm_production=true. Never request credentials in tool arguments."

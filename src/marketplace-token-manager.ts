@@ -42,7 +42,7 @@ type TokenProfile = {
   expires_at: number;
 };
 
-type TokenStore = {
+export type TokenStore = {
   version: 1;
   profiles: Partial<Record<WoltEnvironment, TokenProfile>>;
 };
@@ -62,6 +62,9 @@ export type MarketplaceTokenManagerOptions = {
   lockRetryMs?: number;
   lockTimeoutMs?: number;
   staleLockMs?: number;
+  readStore?: () => Promise<TokenStore>;
+  writeStore?: (store: TokenStore) => Promise<void>;
+  warn?: (message: string) => void;
 };
 
 function nonEmpty(value: unknown): value is string {
@@ -155,6 +158,55 @@ function validateTokenResponse(value: unknown): { accessToken: string; refreshTo
   };
 }
 
+async function fileReadStore(statePath: string): Promise<TokenStore> {
+  try {
+    return parseStore(await readFile(statePath, "utf8"), statePath);
+  } catch (error) {
+    if (asErrorCode(error) === "ENOENT") return { version: STORE_VERSION, profiles: {} };
+    throw error;
+  }
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  try {
+    const handle = await open(directory, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // Directory fsync is unsupported on some platforms (e.g. Windows); best-effort durability only.
+  }
+}
+
+async function fileWriteStore(statePath: string, store: TokenStore): Promise<void> {
+  const directory = dirname(statePath);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700).catch(() => undefined);
+  const temporaryPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temporaryPath, "wx", 0o600);
+  try {
+    try {
+      await handle.writeFile(`${JSON.stringify(store, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+  try {
+    await rename(temporaryPath, statePath);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+  await chmod(statePath, 0o600).catch(() => undefined);
+  await syncDirectory(directory);
+}
+
 export class MarketplaceTokenManager {
   readonly #env: Record<string, string | undefined>;
   readonly #fetcher: Fetcher;
@@ -165,6 +217,11 @@ export class MarketplaceTokenManager {
   readonly #lockTimeoutMs: number;
   readonly #staleLockMs: number;
   readonly #refreshes = new Map<WoltEnvironment, Promise<string>>();
+  readonly #readStoreImpl: () => Promise<TokenStore>;
+  readonly #writeStoreImpl: (store: TokenStore) => Promise<void>;
+  readonly #warn: (message: string) => void;
+  readonly #memoryProfiles = new Map<WoltEnvironment, TokenProfile>();
+  readonly #warnedKeys = new Set<string>();
 
   constructor(options: MarketplaceTokenManagerOptions = {}) {
     this.#env = options.env ?? process.env;
@@ -175,6 +232,9 @@ export class MarketplaceTokenManager {
     this.#lockRetryMs = options.lockRetryMs ?? DEFAULT_LOCK_RETRY_MS;
     this.#lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
     this.#staleLockMs = options.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+    this.#readStoreImpl = options.readStore ?? (() => fileReadStore(this.#statePath));
+    this.#writeStoreImpl = options.writeStore ?? ((store) => fileWriteStore(this.#statePath, store));
+    this.#warn = options.warn ?? ((message) => console.error(message));
   }
 
   async getAccessToken(environment: WoltEnvironment): Promise<string> {
@@ -260,9 +320,23 @@ export class MarketplaceTokenManager {
         refresh_token: token.refreshToken,
         expires_at: this.#now() + token.expiresIn * 1000
       };
-      await this.#writeProfile(environment, nextProfile);
+      try {
+        await this.#writeProfile(environment, nextProfile);
+      } catch (error) {
+        this.#warnOnce(
+          `write-failed:${environment}`,
+          `Wolt OAuth token store write failed for ${environment}; using the refreshed token in memory for this process only. Fix the store path/permissions or re-set ${OAUTH_NAMES[environment].refreshToken} to re-bootstrap. ${this.#sanitize(error, [nextProfile.access_token, nextProfile.refresh_token, config.clientSecret, config.bootstrapRefreshToken])}`
+        );
+      }
+      this.#memoryProfiles.set(environment, nextProfile);
       return nextProfile.access_token;
     });
+  }
+
+  #warnOnce(key: string, message: string): void {
+    if (this.#warnedKeys.has(key)) return;
+    this.#warnedKeys.add(key);
+    this.#warn(message);
   }
 
   async #requestRefresh(
@@ -332,46 +406,24 @@ export class MarketplaceTokenManager {
   }
 
   async #readStore(): Promise<TokenStore> {
-    try {
-      return parseStore(await readFile(this.#statePath, "utf8"), this.#statePath);
-    } catch (error) {
-      if (asErrorCode(error) === "ENOENT") return { version: STORE_VERSION, profiles: {} };
-      throw error;
-    }
+    return this.#readStoreImpl();
   }
 
   async #readProfile(environment: WoltEnvironment, clientId: string): Promise<TokenProfile | undefined> {
-    const profile = (await this.#readStore()).profiles[environment];
-    if (!profile || profile.client_id_fingerprint !== clientIdFingerprint(clientId)) return undefined;
-    return profile;
+    const fingerprint = clientIdFingerprint(clientId);
+    const fileProfile = (await this.#readStore()).profiles[environment];
+    const memoryProfile = this.#memoryProfiles.get(environment);
+    const candidates = [fileProfile, memoryProfile].filter(
+      (profile): profile is TokenProfile => profile !== undefined && profile.client_id_fingerprint === fingerprint
+    );
+    if (candidates.length === 0) return undefined;
+    return candidates.reduce((latest, profile) => (profile.expires_at > latest.expires_at ? profile : latest));
   }
 
   async #writeProfile(environment: WoltEnvironment, profile: TokenProfile): Promise<void> {
     const store = await this.#readStore();
     store.profiles[environment] = profile;
-    const directory = dirname(this.#statePath);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await chmod(directory, 0o700).catch(() => undefined);
-    const temporaryPath = `${this.#statePath}.${process.pid}.${randomUUID()}.tmp`;
-    const handle = await open(temporaryPath, "wx", 0o600);
-    try {
-      try {
-        await handle.writeFile(`${JSON.stringify(store, null, 2)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-    } catch (error) {
-      await unlink(temporaryPath).catch(() => undefined);
-      throw error;
-    }
-    try {
-      await rename(temporaryPath, this.#statePath);
-      await chmod(this.#statePath, 0o600).catch(() => undefined);
-    } catch (error) {
-      await unlink(temporaryPath).catch(() => undefined);
-      throw error;
-    }
+    await this.#writeStoreImpl(store);
   }
 
   async #withFileLock<T>(action: () => Promise<T>): Promise<T> {
@@ -379,40 +431,54 @@ export class MarketplaceTokenManager {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await chmod(directory, 0o700).catch(() => undefined);
     const lockPath = `${this.#statePath}.lock`;
+    const nonce = randomUUID();
     const deadline = Date.now() + this.#lockTimeoutMs;
-    let handle;
-    while (!handle) {
-      try {
-        handle = await open(lockPath, "wx", 0o600);
-      } catch (error) {
-        if (asErrorCode(error) !== "EEXIST") throw error;
+    const ownsLock = async (): Promise<boolean> => (await readFile(lockPath, "utf8").catch(() => "")).includes(nonce);
+
+    while (true) {
+      let handle;
+      while (!handle) {
         try {
-          const lockStat = await stat(lockPath);
-          if (Date.now() - lockStat.mtimeMs > this.#staleLockMs) {
-            await unlink(lockPath);
-            continue;
+          handle = await open(lockPath, "wx", 0o600);
+        } catch (error) {
+          if (asErrorCode(error) !== "EEXIST") throw error;
+          try {
+            const lockStat = await stat(lockPath);
+            if (Date.now() - lockStat.mtimeMs > this.#staleLockMs) {
+              await unlink(lockPath).catch(() => undefined);
+              continue;
+            }
+          } catch (statError) {
+            if (asErrorCode(statError) === "ENOENT") continue;
+            throw statError;
           }
-        } catch (statError) {
-          if (asErrorCode(statError) === "ENOENT") continue;
-          throw statError;
+          if (Date.now() >= deadline) throw new Error(`Timed out waiting for Wolt OAuth token-store lock at ${lockPath}`);
+          await delay(this.#lockRetryMs);
         }
+      }
+      try {
+        await handle.writeFile(JSON.stringify({ pid: process.pid, nonce, created_at: Date.now() }), "utf8");
+        await handle.sync();
+      } catch (error) {
+        await handle.close().catch(() => undefined);
+        if (await ownsLock()) await unlink(lockPath).catch(() => undefined);
+        throw error;
+      }
+      await handle.close().catch(() => undefined);
+
+      // A concurrent stale-lock reclaim could have deleted our file and created its own between open and now.
+      // Only proceed if the lock still carries our nonce; otherwise back off and retry acquisition.
+      if (!(await ownsLock())) {
         if (Date.now() >= deadline) throw new Error(`Timed out waiting for Wolt OAuth token-store lock at ${lockPath}`);
         await delay(this.#lockRetryMs);
+        continue;
       }
-    }
-    try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, created_at: Date.now() }), "utf8");
-      await handle.sync();
-    } catch (error) {
-      await handle.close().catch(() => undefined);
-      await unlink(lockPath).catch(() => undefined);
-      throw error;
-    }
-    try {
-      return await action();
-    } finally {
-      await handle.close().catch(() => undefined);
-      await unlink(lockPath).catch(() => undefined);
+
+      try {
+        return await action();
+      } finally {
+        if (await ownsLock()) await unlink(lockPath).catch(() => undefined);
+      }
     }
   }
 }

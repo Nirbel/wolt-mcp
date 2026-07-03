@@ -11,13 +11,15 @@ async function writeJson(path, value) {
 }
 
 async function packagePlugins() {
+  const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const codexManifest = JSON.parse(await readFile(resolve(root, ".codex-plugin/plugin.json"), "utf8"));
   codexManifest.mcpServers = "./.mcp.json";
+  codexManifest.version = pkg.version;
 
   const claudeManifest = {
     name: "wolt",
     displayName: "Wolt MCP",
-    version: "0.1.0",
+    version: pkg.version,
     description: "Unofficial MCP integration for Wolt Menu, Venue, Order, Timeslot, Drive, and Order Submitter APIs.",
     author: {
       name: "Nirbel",
@@ -29,10 +31,13 @@ async function packagePlugins() {
   };
 
   const launcher = [
+    'import { existsSync } from "node:fs";',
     'import { resolve } from "node:path";',
     'import { pathToFileURL } from "node:url";',
-    'const root = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();',
-    'await import(pathToFileURL(resolve(root, "dist/server.js")).href);'
+    'const root = process.env.CLAUDE_PLUGIN_ROOT || process.env.PLUGIN_ROOT || process.cwd();',
+    'const entry = resolve(root, "dist/server.js");',
+    'if (!existsSync(entry)) throw new Error("Wolt MCP cannot find " + entry + " - plugin root resolved from CLAUDE_PLUGIN_ROOT/PLUGIN_ROOT/cwd=" + root + "; launch from the plugin directory or set CLAUDE_PLUGIN_ROOT.");',
+    'await import(pathToFileURL(entry).href);'
   ].join(" ");
 
   const sharedMcp = {
@@ -40,7 +45,8 @@ async function packagePlugins() {
       wolt: {
         command: "node",
         args: ["--input-type=module", "--eval", launcher],
-        cwd: "."
+        cwd: ".",
+        tool_timeout_sec: 150
       }
     }
   };

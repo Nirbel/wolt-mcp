@@ -124,7 +124,8 @@ export class MenuService {
       method: "GET",
       path: "/v2/venues/{venueId}/menu",
       pathParams: { venueId: options.venueId },
-      confirmProduction: false
+      confirmProduction: false,
+      timeoutMs: Math.min(timeoutMs, 15_000)
     });
     if (!isObject(requested.data)) throw new Error("Wolt returned a malformed asynchronous menu response");
     const resourceUrl = assertAllowedResourceUrl(requested.data.resource_url);
@@ -133,12 +134,18 @@ export class MenuService {
     while (true) {
       const requestRemainingMs = timeoutMs - (this.#now() - startedAt);
       if (requestRemainingMs <= 0) break;
-      const response = await this.#fetcher(resourceUrl, {
-        method: "GET",
-        headers: { accept: "application/json" },
-        redirect: "error",
-        signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15_000))
-      });
+      let response: Response;
+      try {
+        response = await this.#fetcher(resourceUrl, {
+          method: "GET",
+          headers: { accept: "application/json" },
+          redirect: "error",
+          signal: AbortSignal.timeout(Math.min(requestRemainingMs, 15_000))
+        });
+      } catch {
+        // Never echo the presigned resource URL (it carries an X-Amz-Signature) in the error.
+        throw new Error("Wolt menu resource request failed");
+      }
       if (!response.ok) throw new Error(`Wolt menu resource returned HTTP ${response.status}`);
       let result: unknown;
       try {
