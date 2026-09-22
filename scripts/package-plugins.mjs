@@ -58,6 +58,7 @@ async function packagePlugins() {
   await cp(resolve(root, "skills"), resolve(output, "skills"), { recursive: true });
   await cp(resolve(root, "examples"), resolve(output, "examples"), { recursive: true });
   await cp(resolve(root, "README.md"), resolve(output, "README.md"));
+  await cp(resolve(root, "LICENSE"), resolve(output, "LICENSE"));
   await writeJson(resolve(output, ".codex-plugin/plugin.json"), codexManifest);
   await writeJson(resolve(output, ".claude-plugin/plugin.json"), claudeManifest);
   await writeJson(resolve(output, ".mcp.json"), sharedMcp);
