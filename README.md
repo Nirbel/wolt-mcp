@@ -5,7 +5,7 @@
 An unofficial, community-built, stdio-based Model Context Protocol server and Codex plugin for Wolt marketplace and Wolt Drive integrations. It exposes 38 operations from Wolt's Menu, Venue, Order, Timeslot, and Drive APIs, plus three focused helpers for menu-item lookup, stock inspection, and Order Submitter validation.
 
 > [!IMPORTANT]
-> This is an unofficial integration and is not affiliated with or endorsed by Wolt. You need credentials and API access issued by Wolt. The project is currently a private, unlicensed `0.2.0` pre-release; choose and add a license before making the repository public.
+> This is an unofficial integration and is not affiliated with or endorsed by Wolt. You need credentials and API access issued by Wolt. The project is MIT licensed, but you are still responsible for complying with Wolt's API terms and credential policies.
 
 ## Highlights
 
@@ -290,7 +290,7 @@ Set the required variables in the environment that launches Codex, restart Codex
 
 ### Option D: Run through npm/`npx`
 
-The package now exposes a `wolt-mcp` executable and passes `npm pack` inspection. After a public npm scope and license are selected and the package is published, users will be able to run:
+The package exposes a `wolt-mcp` executable and passes `npm pack` inspection. After the package is published, users will be able to run:
 
 ```sh
 npx -y @YOUR_NPM_SCOPE/wolt-mcp
@@ -497,7 +497,7 @@ The generated `specs/wolt-official.json` snapshot preserves source URLs, officia
 - Verify no `.env`, token, key, webhook secret, order payload, or customer data is committed.
 - Never use a production mutation as a release smoke test.
 - Update `CHANGELOG.md` and version fields together.
-- Select and add a license before making this repository public.
+- Confirm the MIT license is still intended for the release.
 
 ## Contributing and security
 
@@ -520,4 +520,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development expectations and [SECURIT
 
 ## License
 
-No open-source license has been selected yet. The package is marked `UNLICENSED` and private. Add an explicit license before public distribution.
+MIT. See [LICENSE](LICENSE).

@@ -2,8 +2,8 @@
   "name": "wolt-mcp",
   "version": "0.2.0",
   "description": "Unofficial Wolt API MCP server and Codex skill with explicit production safeguards.",
-  "private": true,
-  "license": "UNLICENSED",
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "bin": {
     "wolt-mcp": "./dist/server.js"
@@ -46,8 +46,15 @@
     "verify": "npm run build && npm run test && npm run smoke"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "ajv": "8.20.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.1",
+    "fast-uri": "4.2.1",
+    "hono": "4.13.8",
+    "ip-address": "10.7.2",
+    "qs": "6.16.0"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
